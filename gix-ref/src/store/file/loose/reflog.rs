@@ -153,7 +153,7 @@ pub mod create_or_update {
                     if let Some(mut file) = file_for_appending {
                         let committer = committer.ok_or(Error::MissingCommitter)?;
                         write!(file, "{} {} ", previous_oid.unwrap_or_else(|| new.kind().null()), new)
-                            .and_then(|_| committer.write_to(&mut file))
+                            .and_then(|_| write_reflog_committer(&mut file, committer))
                             .and_then(|_| {
                                 if !message.is_empty() {
                                     writeln!(file, "\t{message}")
@@ -197,6 +197,48 @@ pub mod create_or_update {
                 },
             )
         }
+    }
+
+    fn write_reflog_committer(
+        out: &mut dyn std::io::Write,
+        committer: gix_actor::SignatureRef<'_>,
+    ) -> std::io::Result<()> {
+        write_token_without_git_crud(out, committer.name)?;
+        out.write_all(b" <")?;
+        write_token_without_git_crud(out, committer.email)?;
+        out.write_all(b"> ")?;
+        validated_reflog_token(committer.time.as_bytes())?;
+        out.write_all(committer.time.as_bytes())
+    }
+
+    fn write_token_without_git_crud(out: &mut dyn std::io::Write, input: &BStr) -> std::io::Result<()> {
+        let bytes: &[u8] = input.as_ref();
+        let start = bytes.iter().position(|b| !git_ident_crud(*b)).unwrap_or(bytes.len());
+        let end = bytes
+            .iter()
+            .rposition(|b| !git_ident_crud(*b))
+            .map_or(start, |pos| pos + 1);
+
+        for &byte in &bytes[start..end] {
+            if matches!(byte, b'\n' | b'<' | b'>') {
+                continue;
+            }
+            out.write_all(std::slice::from_ref(&byte))?;
+        }
+        Ok(())
+    }
+
+    fn git_ident_crud(byte: u8) -> bool {
+        byte <= b' ' || matches!(byte, b',' | b':' | b';' | b'<' | b'>' | b'"' | b'\\' | b'\'')
+    }
+
+    fn validated_reflog_token(token: &[u8]) -> Result<(), std::io::Error> {
+        if token.iter().any(|b| matches!(b, b'\n' | b'<' | b'>')) {
+            return Err(std::io::Error::other(
+                "Signature name or email must not contain '<', '>' or \\n",
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(test)]
