@@ -1,5 +1,5 @@
 use crate::{debug_string, new_tree_error, ErrorWithSource};
-use gix_error::{message, Error, ErrorExt};
+use gix_error::{message, Error, ErrorExt, ValidationError};
 use std::error::Error as _;
 
 #[test]
@@ -130,4 +130,10 @@ fn from_any_error_with_source() {
         Some(r#"Message("one")"#),
         "The source is provided by the wrapped error"
     );
+}
+
+#[test]
+fn validation_error_displays_input_with_debug_formatting() {
+    let err = ValidationError::new_with_input("invalid input", "hello\n ");
+    assert_eq!(err.to_string(), "invalid input: \"hello\\n \"");
 }
