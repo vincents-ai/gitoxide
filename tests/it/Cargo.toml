@@ -16,6 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"
+arbitrary = { version = "1.4.2", features = ["derive"] }
 clap = { version = "4.5.60", features = ["derive"] }
 gix = { version = "^0.81.0", path = "../../gix", default-features = false, features = ["attributes", "blame", "blob-diff", "revision", "sha1"] }
+gix-imara-diff = { version = "^0.2.0", path = "../../gix-imara-diff" }
 regex = { version = "1.12.3", default-features = false, features = ["std"] }

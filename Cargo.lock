@@ -3146,8 +3146,10 @@ name = "internal-tools"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arbitrary",
  "clap",
  "gix",
+ "gix-imara-diff",
  "regex",
 ]
 

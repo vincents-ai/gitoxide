@@ -54,13 +54,33 @@ fn main() -> anyhow::Result<()> {
             count,
             asset_dir,
         } => commands::create_diff_cases(dry_run, sliders_file, &worktree_dir, destination_dir, count, asset_dir),
+        Subcommands::ExtractMergeFuzzCase {
+            fixture_file,
+            destination_dir,
+            cap,
+        } => commands::extract_merge_fuzz_case(fixture_file, destination_dir, cap),
+        Subcommands::ProfileImaraDiff {
+            algorithm,
+            repeat,
+            before_file,
+            after_file,
+        } => commands::profile_imara_diff(
+            match algorithm {
+                DiffAlgorithm::Histogram => gix_imara_diff::Algorithm::Histogram,
+                DiffAlgorithm::Myers => gix_imara_diff::Algorithm::Myers,
+                DiffAlgorithm::MyersMinimal => gix_imara_diff::Algorithm::MyersMinimal,
+            },
+            repeat,
+            before_file,
+            after_file,
+        ),
         Subcommands::CheckMode {} => commands::check_mode(),
         Subcommands::Env {} => commands::env(),
     }
 }
 
 mod args;
-use args::{Args, Subcommands};
+use args::{Args, DiffAlgorithm, Subcommands};
 
 #[cfg(test)]
 mod tests {
