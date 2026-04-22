@@ -10,6 +10,19 @@ use gix_imara_diff::InternedInput;
 use gix_imara_diff::{Algorithm, Diff, UnifiedDiffConfig};
 
 const ALL_ALGORITHMS: [Algorithm; 2] = [Algorithm::Histogram, Algorithm::Myers];
+const MYERS_ALGORITHMS: [Algorithm; 2] = [Algorithm::Myers, Algorithm::MyersMinimal];
+
+fn render_diff(algorithm: Algorithm, before: &str, after: &str) -> String {
+    let input = InternedInput::new(before, after);
+    let mut diff = Diff::compute(algorithm, &input);
+    diff.postprocess_lines(&input);
+    diff.unified_diff(
+        &BasicLineDiffPrinter(&input.interner),
+        UnifiedDiffConfig::default(),
+        &input,
+    )
+    .to_string()
+}
 
 mod fuzzed {
     use std::time::{Duration, Instant};
@@ -218,6 +231,251 @@ fn simple_insert() {
                 .to_string(),
         );
         swap(&mut input.before, &mut input.after);
+    }
+}
+
+#[test]
+fn myers_minimal_does_not_mark_unchanged_lines_between_changed_lines() {
+    let before = "x\nx\nx\nx\n";
+    let after = "x\nx\nx\nA\nB\nC\nD\nx\nE\nF\nG\n";
+
+    let input = InternedInput::new(before, after);
+    let mut diff = Diff::compute(Algorithm::MyersMinimal, &input);
+    diff.postprocess_lines(&input);
+    let rendered = diff
+        .unified_diff(
+            &BasicLineDiffPrinter(&input.interner),
+            UnifiedDiffConfig::default(),
+            &input,
+        )
+        .to_string();
+
+    expect![[r#"
+        @@ -1,4 +1,11 @@
+         x
+         x
+         x
+        +A
+        +B
+        +C
+        +D
+         x
+        +E
+        +F
+        +G
+    "#]]
+    .assert_eq(&rendered);
+    assert!(
+        rendered.lines().all(|line| line != "+x" && line != "-x"),
+        "minimal diff must not mark unchanged interior lines:\n{rendered}"
+    );
+}
+
+#[test]
+fn myers_algorithms_match_git_frobnitz_diff() {
+    let before = r#"#include <stdio.h>
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("Your answer is: ");
+        printf("%d\n", foo);
+    }
+}
+
+int fact(int n)
+{
+    if(n > 1)
+    {
+        return fact(n-1) * n;
+    }
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fact(10));
+}
+"#;
+
+    let after = r#"#include <stdio.h>
+
+int fib(int n)
+{
+    if(n > 2)
+    {
+        return fib(n-1) + fib(n-2);
+    }
+    return 1;
+}
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("%d\n", foo);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fib(10));
+}
+"#;
+
+    for algorithm in MYERS_ALGORITHMS {
+        let rendered = render_diff(algorithm, before, after);
+        let additions = rendered
+            .lines()
+            .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+            .count();
+        let removals = rendered
+            .lines()
+            .filter(|line| line.starts_with('-') && !line.starts_with("---"))
+            .count();
+
+        assert_eq!(additions, 10, "{algorithm:?} additions changed unexpectedly:\n{rendered}");
+        assert_eq!(removals, 11, "{algorithm:?} removals changed unexpectedly:\n{rendered}");
+        assert!(
+            rendered.contains("+int fib(int n)\n")
+                && rendered.contains("-        printf(\"Your answer is: \");\n")
+                && rendered.contains("-int fact(int n)\n")
+                && rendered.contains("+    frobnitz(fib(10));\n")
+                && rendered.contains("-    frobnitz(fact(10));\n"),
+            "{algorithm:?} lost one of the Git fixture edits:\n{rendered}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "documents current hunk-shape difference from Git on this fixture"]
+fn myers_algorithms_match_git_frobnitz_diff_exactly() {
+    let before = r#"#include <stdio.h>
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("Your answer is: ");
+        printf("%d\n", foo);
+    }
+}
+
+int fact(int n)
+{
+    if(n > 1)
+    {
+        return fact(n-1) * n;
+    }
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fact(10));
+}
+"#;
+
+    let after = r#"#include <stdio.h>
+
+int fib(int n)
+{
+    if(n > 2)
+    {
+        return fib(n-1) + fib(n-2);
+    }
+    return 1;
+}
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("%d\n", foo);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fib(10));
+}
+"#;
+
+    for algorithm in MYERS_ALGORITHMS {
+        expect![[r#"
+            @@ -1,26 +1,25 @@
+             #include <stdio.h>
+             
+            +int fib(int n)
+            +{
+            +    if(n > 2)
+            +    {
+            +        return fib(n-1) + fib(n-2);
+            +    }
+            +    return 1;
+            +}
+            +
+             // Frobs foo heartily
+             int frobnitz(int foo)
+             {
+                 int i;
+                 for(i = 0; i < 10; i++)
+                 {
+            -        printf("Your answer is: ");
+                     printf("%d\n", foo);
+                 }
+             }
+             
+            -int fact(int n)
+            -{
+            -    if(n > 1)
+            -    {
+            -        return fact(n-1) * n;
+            -    }
+            -    return 1;
+            -}
+            -
+             int main(int argc, char **argv)
+             {
+            -    frobnitz(fact(10));
+            +    frobnitz(fib(10));
+             }
+        "#]]
+        .assert_eq(&render_diff(algorithm, before, after));
+    }
+}
+
+#[test]
+fn myers_algorithms_match_git_completely_different_files_diff() {
+    let before = "1\n2\n3\n4\n5\n6\n";
+    let after = "a\nb\nc\nd\ne\nf\n";
+
+    for algorithm in MYERS_ALGORITHMS {
+        expect![[r#"
+            @@ -1,6 +1,6 @@
+            -1
+            -2
+            -3
+            -4
+            -5
+            -6
+            +a
+            +b
+            +c
+            +d
+            +e
+            +f
+        "#]]
+        .assert_eq(&render_diff(algorithm, before, after));
     }
 }
 

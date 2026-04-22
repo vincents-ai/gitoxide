@@ -6,6 +6,7 @@ use gix_merge::blob::Resolution;
 use libfuzzer_sys::fuzz_target;
 use std::hint::black_box;
 use std::num::NonZero;
+use std::sync::OnceLock;
 
 fn fuzz_text_merge(
     Ctx {
@@ -17,13 +18,14 @@ fn fuzz_text_merge(
 ) -> Result<()> {
     let mut buf = Vec::new();
     let mut input = imara_diff::InternedInput::default();
-    // Fuzz this merge entrypoint with Histogram only. Repetitive adversarial text can drive the
-    // Myers-family algorithms into pathological runtimes under sanitizer and coverage
-    // instrumentation, which makes them unsuitable for this libFuzzer target and obscures
-    // gix-merge-specific bugs behind diff-algorithm timeouts.
+    let algorithm = fuzz_algorithm();
+    let cap = fuzz_buffer_cap();
+    let base = cap_bytes(base, cap);
+    let ours = cap_bytes(ours, cap);
+    let theirs = cap_bytes(theirs, cap);
     for (left, right) in [(ours, theirs), (theirs, ours)] {
         input.clear();
-        let prepared = text::Merge::new(&mut input, left, base, right, imara_diff::Algorithm::Histogram);
+        let prepared = text::Merge::new(&mut input, left, base, right, algorithm);
         let resolution = prepared.run(&mut buf, Default::default(), Conflict::default());
         if resolution == Resolution::Conflict {
             for conflict in [
@@ -44,6 +46,31 @@ fn fuzz_text_merge(
         }
     }
     Ok(())
+}
+
+fn fuzz_algorithm() -> imara_diff::Algorithm {
+    static ALGORITHM: OnceLock<imara_diff::Algorithm> = OnceLock::new();
+    *ALGORITHM.get_or_init(|| match std::env::var("GIX_MERGE_FUZZ_DIFF_ALGORITHM").ok().as_deref() {
+        Some("myers") => imara_diff::Algorithm::Myers,
+        Some("myers-minimal") => imara_diff::Algorithm::MyersMinimal,
+        Some("histogram") | None => imara_diff::Algorithm::Histogram,
+        Some(value) => panic!(
+            "unsupported GIX_MERGE_FUZZ_DIFF_ALGORITHM={value:?}, expected histogram|myers|myers-minimal"
+        ),
+    })
+}
+
+fn fuzz_buffer_cap() -> Option<usize> {
+    static BUFFER_CAP: OnceLock<Option<usize>> = OnceLock::new();
+    *BUFFER_CAP.get_or_init(|| {
+        std::env::var("GIX_MERGE_FUZZ_BUFFER_CAP")
+            .ok()
+            .map(|value| value.parse().expect("GIX_MERGE_FUZZ_BUFFER_CAP must be a usize"))
+    })
+}
+
+fn cap_bytes(data: &[u8], cap: Option<usize>) -> &[u8] {
+    cap.and_then(|cap| data.get(..cap)).unwrap_or(data)
 }
 
 #[derive(Debug, Arbitrary)]

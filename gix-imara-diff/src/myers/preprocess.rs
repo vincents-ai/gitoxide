@@ -110,6 +110,7 @@ fn prune_unmatched_tokens(
     changed: &mut [bool],
 ) -> (Vec<Token>, Vec<u32>) {
     assert_eq!(token_status.len(), file.len());
+    let prune_common = common_line_prune_map(token_status);
     file.iter()
         .zip(token_status)
         .enumerate()
@@ -117,7 +118,7 @@ fn prune_unmatched_tokens(
             let prune = match status {
                 Occurrences::None => true,
                 Occurrences::Some => false,
-                Occurrences::Common => should_prune_common_line(token_status, i),
+                Occurrences::Common => prune_common[i],
             };
             if prune {
                 changed[i] = true;
@@ -129,7 +130,60 @@ fn prune_unmatched_tokens(
         .unzip()
 }
 
-// TODO do not unnecessarily rescan lines
+fn common_line_prune_map(token_status: &[Occurrences]) -> Vec<bool> {
+    const WINDOW_SIZE: usize = 100;
+
+    let mut prune = vec![false; token_status.len()];
+    let mut start = 0;
+    while start < token_status.len() {
+        if matches!(token_status[start], Occurrences::Some) {
+            start += 1;
+            continue;
+        }
+
+        let mut end = start + 1;
+        while end < token_status.len() && !matches!(token_status[end], Occurrences::Some) {
+            end += 1;
+        }
+
+        let segment = &token_status[start..end];
+        let mut none_prefix = vec![0usize; segment.len() + 1];
+        let mut common_prefix = vec![0usize; segment.len() + 1];
+        for (idx, status) in segment.iter().enumerate() {
+            none_prefix[idx + 1] = none_prefix[idx] + usize::from(matches!(status, Occurrences::None));
+            common_prefix[idx + 1] = common_prefix[idx] + usize::from(matches!(status, Occurrences::Common));
+        }
+
+        for (local_pos, status) in segment.iter().enumerate() {
+            if !matches!(status, Occurrences::Common) {
+                continue;
+            }
+
+            let before_start = local_pos.saturating_sub(WINDOW_SIZE);
+            let unmatched_before = none_prefix[local_pos] - none_prefix[before_start];
+            if unmatched_before == 0 {
+                continue;
+            }
+            let common_before = common_prefix[local_pos] - common_prefix[before_start];
+
+            let after_end = segment.len().min(local_pos + WINDOW_SIZE);
+            let unmatched_after = none_prefix[after_end] - none_prefix[local_pos];
+            if unmatched_after == 0 {
+                continue;
+            }
+            let common_after = common_prefix[after_end] - common_prefix[local_pos];
+
+            let common = common_before + common_after;
+            let unmatched = unmatched_before + unmatched_after;
+            prune[start + local_pos] = unmatched > 3 * common;
+        }
+
+        start = end;
+    }
+    prune
+}
+
+#[cfg(test)]
 fn should_prune_common_line(token_status: &[Occurrences], pos: usize) -> bool {
     const WINDOW_SIZE: usize = 100;
 
@@ -180,7 +234,7 @@ fn should_prune_common_line(token_status: &[Occurrences], pos: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_prune_common_line, Occurrences};
+    use super::{common_line_prune_map, should_prune_common_line, Occurrences};
 
     #[test]
     fn common_line_pruning_ignores_distant_context() {
@@ -195,5 +249,30 @@ mod tests {
             !should_prune_common_line(&token_status, 500),
             "only the last 100 items before the current line should contribute to the backward scan"
         );
+    }
+
+    #[test]
+    fn common_line_prune_map_matches_scalar_logic() {
+        for len in 0..=8 {
+            let total = 3usize.pow(len as u32);
+            for mut encoded in 0..total {
+                let mut statuses = Vec::with_capacity(len);
+                for _ in 0..len {
+                    statuses.push(match encoded % 3 {
+                        0 => Occurrences::None,
+                        1 => Occurrences::Some,
+                        _ => Occurrences::Common,
+                    });
+                    encoded /= 3;
+                }
+
+                let map = common_line_prune_map(&statuses);
+                for (pos, status) in statuses.iter().enumerate() {
+                    let expected = matches!(status, Occurrences::Common)
+                        && should_prune_common_line(&statuses, pos);
+                    assert_eq!(map[pos], expected, "statuses={statuses:?}, pos={pos}");
+                }
+            }
+        }
     }
 }

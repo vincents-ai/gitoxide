@@ -150,7 +150,13 @@ mod text {
         marker_size: NonZero<u8>,
     }
 
-    fn run_fuzz_case(ours: &[u8], base: &[u8], theirs: &[u8], marker_size: NonZero<u8>) {
+    fn run_fuzz_case(
+        ours: &[u8],
+        base: &[u8],
+        theirs: &[u8],
+        marker_size: NonZero<u8>,
+        algorithm: imara_diff::Algorithm,
+    ) {
         let mut out = Vec::new();
         let mut input = imara_diff::InternedInput::default();
         // Keep this in sync with the fuzz target. Histogram remains enabled here because it is the
@@ -160,7 +166,7 @@ mod text {
         // fuzz harness.
         for (left, right) in [(ours, theirs), (theirs, ours)] {
             input.clear();
-            let merge = text::Merge::new(&mut input, left, base, right, imara_diff::Algorithm::Histogram);
+            let merge = text::Merge::new(&mut input, left, base, right, algorithm);
             let resolution = merge.run(&mut out, Default::default(), Conflict::default());
             if resolution == Resolution::Conflict {
                 for conflict in [
@@ -198,8 +204,30 @@ mod text {
         ] {
             let ctx = FuzzCtx::arbitrary(&mut arbitrary::Unstructured::new(data))
                 .unwrap_or_else(|_| panic!("{name}: testcase matches the historical fuzz target input layout"));
-            run_fuzz_case(ctx.ours, ctx.base, ctx.theirs, ctx.marker_size);
+            run_fuzz_case(
+                ctx.ours,
+                ctx.base,
+                ctx.theirs,
+                ctx.marker_size,
+                imara_diff::Algorithm::Histogram,
+            );
         }
+    }
+
+    #[test]
+    #[ignore = "profiling reproduction for pathological Myers fuzz cases"]
+    fn clusterfuzz_timeout_regression_myers() {
+        let data = include_bytes!("../../fixtures/clusterfuzz-testcase-minimized-gix-merge-blob-5577413097750528")
+            .as_slice();
+        let ctx = FuzzCtx::arbitrary(&mut arbitrary::Unstructured::new(data))
+            .expect("testcase matches the historical fuzz target input layout");
+        run_fuzz_case(
+            ctx.ours,
+            ctx.base,
+            ctx.theirs,
+            ctx.marker_size,
+            imara_diff::Algorithm::Myers,
+        );
     }
 
     #[test]
@@ -357,6 +385,134 @@ mod text {
             );
             assert_eq!(actual, expected, "{conflict:?}");
         }
+    }
+
+    #[test]
+    fn crlf_conflict_markers_match_libgit2_merge_file() {
+        let labels = builtin_driver::text::Labels {
+            ancestor: Some("file.txt".into()),
+            current: Some("file.txt".into()),
+            other: Some("file.txt".into()),
+        };
+        let base = b"This file has\r\nCRLF line endings.\r\n";
+        let ours = b"This file\r\ndoes, too.\r\n";
+        let theirs = b"And so does\r\nthis one.\r\n";
+        let mut input = imara_diff::InternedInput::default();
+        let mut out = Vec::new();
+
+        let resolution = builtin_driver::text(
+            &mut out,
+            &mut input,
+            labels,
+            ours,
+            base,
+            theirs,
+            builtin_driver::text::Options {
+                conflict: Conflict::Keep {
+                    style: ConflictStyle::Merge,
+                    marker_size: 7.try_into().unwrap(),
+                },
+                ..Default::default()
+            },
+        );
+        assert_eq!(resolution, Resolution::Conflict);
+        assert_str_eq!(
+            String::from_utf8_lossy(&out),
+            "<<<<<<< file.txt\r\nThis file\r\ndoes, too.\r\n=======\r\nAnd so does\r\nthis one.\r\n>>>>>>> file.txt\r\n"
+        );
+
+        input.clear();
+        out.clear();
+        let resolution = builtin_driver::text(
+            &mut out,
+            &mut input,
+            labels,
+            ours,
+            base,
+            theirs,
+            builtin_driver::text::Options {
+                conflict: Conflict::Keep {
+                    style: ConflictStyle::Diff3,
+                    marker_size: 7.try_into().unwrap(),
+                },
+                ..Default::default()
+            },
+        );
+        assert_eq!(resolution, Resolution::Conflict);
+        assert_str_eq!(
+            String::from_utf8_lossy(&out),
+            "<<<<<<< file.txt\r\nThis file\r\ndoes, too.\r\n||||||| file.txt\r\nThis file has\r\nCRLF line endings.\r\n=======\r\nAnd so does\r\nthis one.\r\n>>>>>>> file.txt\r\n"
+        );
+    }
+
+    #[test]
+    fn zdiff3_conflicts_match_libgit2_merge_file() {
+        let labels = builtin_driver::text::Labels {
+            ancestor: Some("file.txt".into()),
+            current: Some("file.txt".into()),
+            other: Some("file.txt".into()),
+        };
+        let base = b"1,\n# add more here\n3,\n";
+        let ours = b"1,\nfoo,\nbar,\nbaz,\n3,\n";
+        let theirs = b"1,\nfoo,\nbar,\nquux,\nwoot,\nbaz,\n3,\n";
+        let mut input = imara_diff::InternedInput::default();
+        let mut out = Vec::new();
+        let resolution = builtin_driver::text(
+            &mut out,
+            &mut input,
+            labels,
+            ours,
+            base,
+            theirs,
+            builtin_driver::text::Options {
+                conflict: Conflict::Keep {
+                    style: ConflictStyle::ZealousDiff3,
+                    marker_size: 7.try_into().unwrap(),
+                },
+                ..Default::default()
+            },
+        );
+        assert_eq!(resolution, Resolution::Conflict);
+        assert_str_eq!(
+            String::from_utf8_lossy(&out),
+            "1,\nfoo,\nbar,\n<<<<<<< file.txt\n||||||| file.txt\n# add more here\n=======\nquux,\nwoot,\n>>>>>>> file.txt\nbaz,\n3,\n"
+        );
+    }
+
+    #[test]
+    fn myers_diff3_matches_git_spurious_c_conflict_case() {
+        let labels = builtin_driver::text::Labels {
+            ancestor: Some("base.c".into()),
+            current: Some("ours.c".into()),
+            other: Some("theirs.c".into()),
+        };
+        let base = b"int f(int x, int y)\n{\n  if (x == 0)\n  {\n    return y;\n  }\n  return x;\n}\n\nint g(size_t u)\n{\n  while (u < 30)\n  {\n    u++;\n  }\n  return u;\n}\n";
+        let ours = b"int g(size_t u)\n{\n  while (u < 30)\n  {\n    u++;\n  }\n  return u;\n}\n\nint h(int x, int y, int z)\n{\n  if (z == 0)\n  {\n    return x;\n  }\n  return y;\n}\n";
+        let theirs = b"int f(int x, int y)\n{\n  if (x == 0)\n  {\n    return y;\n  }\n  return x;\n}\n\nint g(size_t u)\n{\n  while (u > 34)\n  {\n    u--;\n  }\n  return u;\n}\n";
+        let mut input = imara_diff::InternedInput::default();
+        let mut out = Vec::new();
+
+        let resolution = builtin_driver::text(
+            &mut out,
+            &mut input,
+            labels,
+            ours,
+            base,
+            theirs,
+            builtin_driver::text::Options {
+                diff_algorithm: imara_diff::Algorithm::Myers,
+                conflict: Conflict::Keep {
+                    style: ConflictStyle::Diff3,
+                    marker_size: 7.try_into().unwrap(),
+                },
+            },
+        );
+
+        assert_eq!(resolution, Resolution::Conflict);
+        assert_str_eq!(
+            String::from_utf8_lossy(&out),
+            "int g(size_t u)\n{\n  while (u < 30)\n  {\n    u++;\n  }\n  return u;\n}\n\nint h(int x, int y, int z)\n{\n<<<<<<< ours.c\n  if (z == 0)\n||||||| base.c\n  while (u < 30)\n=======\n  while (u > 34)\n>>>>>>> theirs.c\n  {\n<<<<<<< ours.c\n    return x;\n||||||| base.c\n    u++;\n=======\n    u--;\n>>>>>>> theirs.c\n  }\n  return y;\n}\n"
+        );
     }
 
     mod false_conflict {
