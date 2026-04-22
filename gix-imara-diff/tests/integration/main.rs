@@ -339,7 +339,10 @@ int main(int argc, char **argv)
             .filter(|line| line.starts_with('-') && !line.starts_with("---"))
             .count();
 
-        assert_eq!(additions, 10, "{algorithm:?} additions changed unexpectedly:\n{rendered}");
+        assert_eq!(
+            additions, 10,
+            "{algorithm:?} additions changed unexpectedly:\n{rendered}"
+        );
         assert_eq!(removals, 11, "{algorithm:?} removals changed unexpectedly:\n{rendered}");
         assert!(
             rendered.contains("+int fib(int n)\n")

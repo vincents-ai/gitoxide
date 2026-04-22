@@ -24,7 +24,7 @@ mod slice;
 pub fn diff(before: &[Token], after: &[Token], removed: &mut [bool], added: &mut [bool], minimal: bool) {
     // Preprocess the files by removing parts of the file that are not contained in the other file at all.
     // This process remaps the token indices so we have to account for that during the rest of the diff
-    let (before, after) = preprocess::preprocess(before, after, removed, added);
+    let (before, after) = preprocess::preprocess(before, after, removed, added, minimal);
 
     // Perform the actual diff
     Myers::new(before.tokens.len(), after.tokens.len()).run(
@@ -115,9 +115,9 @@ impl Myers {
         let mut backwards_search = unsafe { MiddleSnakeSearch::<true>::new(self.kbackward, file1, file2) };
         let is_odd = file2.len().wrapping_sub(file1.len()) & 1 != 0;
 
-        let mut ec = 0;
+        let mut ec = 1;
 
-        while ec <= self.max_cost {
+        loop {
             let mut found_snake = false;
             forward_search.next_d();
             if is_odd {
@@ -166,6 +166,24 @@ impl Myers {
             };
 
             if need_min {
+                if ec >= self.max_cost {
+                    let (distance_forward, token_idx1_forward) = forward_search.best_position(file1, file2);
+                    let (distance_backwards, token_idx1_backwards) = backwards_search.best_position(file1, file2);
+                    if distance_forward > file1.len() as isize + file2.len() as isize - distance_backwards {
+                        return Split {
+                            token_idx1: token_idx1_forward,
+                            token_idx2: (distance_forward - token_idx1_forward as isize) as i32,
+                            minimized_lo: true,
+                            minimized_hi: false,
+                        };
+                    }
+                    return Split {
+                        token_idx1: token_idx1_backwards,
+                        token_idx2: (distance_backwards - token_idx1_backwards as isize) as i32,
+                        minimized_lo: false,
+                        minimized_hi: true,
+                    };
+                }
                 ec += 1;
                 continue;
             }
@@ -198,25 +216,26 @@ impl Myers {
                 }
             }
 
-            ec += 1;
-        }
+            if ec >= self.max_cost {
+                let (distance_forward, token_idx1_forward) = forward_search.best_position(file1, file2);
+                let (distance_backwards, token_idx1_backwards) = backwards_search.best_position(file1, file2);
+                if distance_forward > file1.len() as isize + file2.len() as isize - distance_backwards {
+                    return Split {
+                        token_idx1: token_idx1_forward,
+                        token_idx2: (distance_forward - token_idx1_forward as isize) as i32,
+                        minimized_lo: true,
+                        minimized_hi: false,
+                    };
+                }
+                return Split {
+                    token_idx1: token_idx1_backwards,
+                    token_idx2: (distance_backwards - token_idx1_backwards as isize) as i32,
+                    minimized_lo: false,
+                    minimized_hi: true,
+                };
+            }
 
-        let (distance_forward, token_idx1_forward) = forward_search.best_position(file1, file2);
-        let (distance_backwards, token_idx1_backwards) = backwards_search.best_position(file1, file2);
-        if distance_forward > file1.len() as isize + file2.len() as isize - distance_backwards {
-            Split {
-                token_idx1: token_idx1_forward,
-                token_idx2: (distance_forward - token_idx1_forward as isize) as i32,
-                minimized_lo: true,
-                minimized_hi: false,
-            }
-        } else {
-            Split {
-                token_idx1: token_idx1_backwards,
-                token_idx2: (distance_backwards - token_idx1_backwards as isize) as i32,
-                minimized_lo: false,
-                minimized_hi: true,
-            }
+            ec += 1;
         }
     }
 }

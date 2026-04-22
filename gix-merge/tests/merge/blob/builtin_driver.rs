@@ -217,8 +217,8 @@ mod text {
     #[test]
     #[ignore = "profiling reproduction for pathological Myers fuzz cases"]
     fn clusterfuzz_timeout_regression_myers() {
-        let data = include_bytes!("../../fixtures/clusterfuzz-testcase-minimized-gix-merge-blob-5577413097750528")
-            .as_slice();
+        let data =
+            include_bytes!("../../fixtures/clusterfuzz-testcase-minimized-gix-merge-blob-5577413097750528").as_slice();
         let ctx = FuzzCtx::arbitrary(&mut arbitrary::Unstructured::new(data))
             .expect("testcase matches the historical fuzz target input layout");
         run_fuzz_case(

@@ -158,25 +158,6 @@ pub enum Subcommands {
         #[clap(long)]
         asset_dir: Option<BString>,
     },
-    /// Decode a `gix-merge` fuzz fixture into separate blob files and optional capped variants.
-    ///
-    /// This is primarily useful for extracting a pathological merge testcase into `ours`, `base`,
-    /// and `theirs` files so that both Git's xdiff helper and `gix-imara-diff` can be profiled on
-    /// the resulting inputs.
-    ExtractMergeFuzzCase {
-        /// The raw fuzz fixture file, as stored in `gix-merge/tests/fixtures`.
-        #[clap(long)]
-        fixture_file: PathBuf,
-        /// The directory into which the extracted cases will be written.
-        #[clap(long)]
-        destination_dir: PathBuf,
-        /// Truncate the raw fuzz input to this many bytes before decoding it.
-        ///
-        /// Specify this multiple times to emit multiple decoded variants, e.g. `--cap 13138 --cap
-        /// 13139`. The uncapped `full` case is always written as well.
-        #[clap(long)]
-        cap: Vec<usize>,
-    },
     /// Run `gix-imara-diff` on two files and print basic timing and token statistics.
     ///
     /// The output is intentionally simple so the command is easy to use under profilers such as
@@ -195,6 +176,23 @@ pub enum Subcommands {
         before_file: PathBuf,
         /// The file to treat as `after`.
         after_file: PathBuf,
+    },
+    /// Replay the historical `gix-merge` fuzz testcase with a chosen diff algorithm.
+    ///
+    /// This runs the same loop as the timeout regression test but allows selecting Myers-family
+    /// algorithms and truncating the original input before decoding it.
+    ReplayMergeFuzzCase {
+        /// The diff algorithm to use inside the merge replay.
+        #[clap(long, value_enum, default_value_t = DiffAlgorithm::Myers)]
+        algorithm: DiffAlgorithm,
+        /// Run the replay this many times in one process.
+        #[clap(long, default_value_t = 1)]
+        repeat: usize,
+        /// Truncate the raw fuzz input to this many bytes before decoding it.
+        #[clap(long)]
+        cap: Option<usize>,
+        /// The raw fuzz fixture file, as stored in `gix-merge/tests/fixtures`.
+        fixture_file: PathBuf,
     },
     /// Check for executable bits that disagree with shebangs.
     ///

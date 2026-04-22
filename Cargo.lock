@@ -3150,6 +3150,7 @@ dependencies = [
  "clap",
  "gix",
  "gix-imara-diff",
+ "gix-merge",
  "regex",
 ]
 

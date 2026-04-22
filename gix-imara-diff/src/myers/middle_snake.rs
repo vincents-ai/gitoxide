@@ -4,8 +4,6 @@
 use std::ptr::NonNull;
 
 use crate::myers::slice::FileSlice;
-use crate::util::{common_postfix, common_prefix};
-
 /// Minimum snake length to be considered a "good" snake for heuristics.
 const SNAKE_CNT: u32 = 20;
 /// Heuristic multiplier used to evaluate snake quality.
@@ -19,6 +17,8 @@ const K_HEUR: u32 = 4;
 pub struct MiddleSnakeSearch<const BACK: bool> {
     /// Pointer to the k-vector storage for this search direction.
     kvec: NonNull<i32>,
+    /// Mid-diagonal for this search direction.
+    kmid: i32,
     /// Minimum k-diagonal currently being searched.
     kmin: i32,
     /// Maximum k-diagonal currently being searched.
@@ -38,6 +38,7 @@ impl<const BACK: bool> MiddleSnakeSearch<BACK> {
         let kmid = if BACK { dmin + dmax } else { 0 };
         let mut res = Self {
             kvec: data,
+            kmid,
             kmin: kmid,
             kmax: kmid,
             dmin,
@@ -115,45 +116,50 @@ impl<const BACK: bool> MiddleSnakeSearch<BACK> {
         while k >= self.kmin {
             #[cfg(test)]
             cov_mark::hit!(SPLIT_SEARCH_ITER);
+            let prev = self.x_pos_at_diagonal(k - 1);
+            let next = self.x_pos_at_diagonal(k + 1);
             let mut token_idx1 = if BACK {
-                if self.x_pos_at_diagonal(k - 1) < self.x_pos_at_diagonal(k + 1) {
-                    self.x_pos_at_diagonal(k - 1)
+                if prev < next {
+                    prev
                 } else {
-                    self.x_pos_at_diagonal(k + 1) - 1
+                    next - 1
                 }
-            } else if self.x_pos_at_diagonal(k - 1) >= self.x_pos_at_diagonal(k + 1) {
-                self.x_pos_at_diagonal(k - 1) + 1
+            } else if prev >= next {
+                prev + 1
             } else {
-                self.x_pos_at_diagonal(k + 1)
+                next
             };
 
             let mut token_idx2 = token_idx1 - k;
-            let off = if BACK {
-                if token_idx1 > 0 && token_idx2 > 0 {
-                    let tokens1 = &file1.tokens[..token_idx1 as usize];
-                    let tokens2 = &file2.tokens[..token_idx2 as usize];
-                    common_postfix(tokens1, tokens2)
-                } else {
-                    0
+            let mut off = 0i32;
+            if BACK {
+                while token_idx1 - off > 0
+                    && token_idx2 - off > 0
+                    && file1.tokens[token_idx1 as usize - 1 - off as usize]
+                        == file2.tokens[token_idx2 as usize - 1 - off as usize]
+                {
+                    off += 1;
                 }
-            } else if token_idx1 < file1.len() as i32 && token_idx2 < file2.len() as i32 {
-                let tokens1 = &file1.tokens[token_idx1 as usize..];
-                let tokens2 = &file2.tokens[token_idx2 as usize..];
-                common_prefix(tokens1, tokens2)
             } else {
-                0
-            };
+                while token_idx1 + off < file1.len() as i32
+                    && token_idx2 + off < file2.len() as i32
+                    && file1.tokens[token_idx1 as usize + off as usize]
+                        == file2.tokens[token_idx2 as usize + off as usize]
+                {
+                    off += 1;
+                }
+            }
 
-            if off > SNAKE_CNT {
+            if off > SNAKE_CNT as i32 {
                 res = Some(SearchResult::Snake)
             }
 
             if BACK {
-                token_idx1 -= off as i32;
-                token_idx2 -= off as i32;
+                token_idx1 -= off;
+                token_idx2 -= off;
             } else {
-                token_idx1 += off as i32;
-                token_idx2 += off as i32;
+                token_idx1 += off;
+                token_idx2 += off;
             }
             self.write_xpos_at_diagonal(k, token_idx1);
 
@@ -201,7 +207,7 @@ impl<const BACK: bool> MiddleSnakeSearch<BACK> {
     }
 
     pub fn found_snake(&self, ec: u32, file1: &FileSlice, file2: &FileSlice) -> Option<(i32, i32)> {
-        let mut best_score = 0;
+        let mut best_score = 0i32;
         let mut best_token_idx1 = 0;
         let mut best_token_idx2 = 0;
         let mut k = self.kmax;
@@ -227,14 +233,14 @@ impl<const BACK: bool> MiddleSnakeSearch<BACK> {
                 }
             }
 
-            let main_diagonal_distance = k.unsigned_abs() as usize;
+            let main_diagonal_distance = (k - self.kmid).abs();
             let distance = if BACK {
                 (file1.len() - token_idx1 as u32) + (file2.len() - token_idx2 as u32)
             } else {
                 token_idx1 as u32 + token_idx2 as u32
-            };
-            let score = distance as usize + main_diagonal_distance;
-            if score > (K_HEUR * ec) as usize && score > best_score {
+            } as i32;
+            let score = distance - main_diagonal_distance;
+            if score > (K_HEUR * ec) as i32 && score > best_score {
                 let is_snake = if BACK {
                     file1.tokens[token_idx1 as usize..]
                         .iter()

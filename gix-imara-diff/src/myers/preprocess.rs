@@ -7,20 +7,22 @@ use crate::myers::sqrt;
 /// Preprocesses token sequences by removing tokens that don't appear in the other sequence.
 ///
 /// This optimization reduces the problem size for the Myers algorithm, improving performance
-/// for files with many unique tokens.
+/// for files with many unique tokens. In non-minimal mode, it also prunes highly repetitive
+/// tokens that are surrounded by enough unmatched tokens to be unhelpful as anchors.
 pub fn preprocess<'a>(
     before: &[Token],
     after: &[Token],
     removed: &'a mut [bool],
     added: &'a mut [bool],
+    minimal: bool,
 ) -> (PreprocessedFile, PreprocessedFile) {
-    let (occurrences_before, occurrences_after) = token_occurrences(before, after);
+    let (occurrences_before, occurrences_after) = token_occurrences(before, after, minimal);
     let file1 = PreprocessedFile::new(&occurrences_before, before, removed);
     let file2 = PreprocessedFile::new(&occurrences_after, after, added);
     (file1, file2)
 }
 
-fn token_occurrences(file1: &[Token], file2: &[Token]) -> (Vec<Occurrences>, Vec<Occurrences>) {
+fn token_occurrences(file1: &[Token], file2: &[Token], minimal: bool) -> (Vec<Occurrences>, Vec<Occurrences>) {
     const MAX_EQLIMIT: u32 = 1024;
 
     // compute the limit after which tokens are treated as `Occurrences::COMMON`
@@ -48,7 +50,7 @@ fn token_occurrences(file1: &[Token], file2: &[Token]) -> (Vec<Occurrences>, Vec
             }
             occurrences2[bucket] += 1;
             let occurrences1 = *occurrences1.get(bucket).unwrap_or(&0);
-            Occurrences::from_occurrences(occurrences1, eqlimit2)
+            Occurrences::from_occurrences(occurrences1, eqlimit2, minimal)
         })
         .collect();
 
@@ -57,7 +59,7 @@ fn token_occurrences(file1: &[Token], file2: &[Token]) -> (Vec<Occurrences>, Vec
         .map(|token| {
             let bucket = token.0 as usize;
             let occurrences2 = *occurrences2.get(bucket).unwrap_or(&0);
-            Occurrences::from_occurrences(occurrences2, eqlimit1)
+            Occurrences::from_occurrences(occurrences2, eqlimit1, minimal)
         })
         .collect();
 
@@ -77,10 +79,10 @@ enum Occurrences {
 }
 
 impl Occurrences {
-    pub fn from_occurrences(occurrences: u32, eqlimit: u32) -> Occurrences {
+    pub fn from_occurrences(occurrences: u32, eqlimit: u32, minimal: bool) -> Occurrences {
         if occurrences == 0 {
             Occurrences::None
-        } else if occurrences >= eqlimit {
+        } else if !minimal && occurrences >= eqlimit {
             Occurrences::Common
         } else {
             Occurrences::Some
@@ -234,7 +236,9 @@ fn should_prune_common_line(token_status: &[Occurrences], pos: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{common_line_prune_map, should_prune_common_line, Occurrences};
+    use crate::intern::Token;
+
+    use super::{common_line_prune_map, preprocess, should_prune_common_line, Occurrences};
 
     #[test]
     fn common_line_pruning_ignores_distant_context() {
@@ -268,11 +272,33 @@ mod tests {
 
                 let map = common_line_prune_map(&statuses);
                 for (pos, status) in statuses.iter().enumerate() {
-                    let expected = matches!(status, Occurrences::Common)
-                        && should_prune_common_line(&statuses, pos);
+                    let expected = matches!(status, Occurrences::Common) && should_prune_common_line(&statuses, pos);
                     assert_eq!(map[pos], expected, "statuses={statuses:?}, pos={pos}");
                 }
             }
         }
+    }
+
+    #[test]
+    fn minimal_mode_keeps_common_tokens_that_plain_myers_prunes() {
+        let before = [Token(1), Token(2), Token(3), Token(0), Token(4), Token(5), Token(6)];
+        let after = [Token(0), Token(0)];
+
+        let mut removed = vec![false; before.len()];
+        let mut added = vec![false; after.len()];
+        let (before_plain, after_plain) = preprocess(&before, &after, &mut removed, &mut added, false);
+        assert!(before_plain.tokens.is_empty());
+        assert_eq!(after_plain.tokens, after);
+        assert_eq!(removed, vec![true; before.len()]);
+        assert_eq!(added, vec![false; after.len()]);
+
+        removed.fill(false);
+        added.fill(false);
+        let (before_minimal, after_minimal) = preprocess(&before, &after, &mut removed, &mut added, true);
+        assert_eq!(before_minimal.tokens, vec![Token(0)]);
+        assert_eq!(before_minimal.indices, vec![3]);
+        assert_eq!(after_minimal.tokens, after);
+        assert_eq!(removed, vec![true, true, true, false, true, true, true]);
+        assert_eq!(added, vec![false; after.len()]);
     }
 }
