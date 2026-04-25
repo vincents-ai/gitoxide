@@ -36,10 +36,25 @@ pub(crate) mod function {
                         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?,
                 )
             }
-            gix_url::Scheme::Ssh => Box::new({
-                crate::client::blocking_io::ssh::connect(url, options.version, options.ssh, options.trace)
-                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
-            }),
+            gix_url::Scheme::Ssh => {
+                #[cfg(feature = "russh-client")]
+                if let Some(ref russh_opts) = options.russh {
+                    let key = russh::keys::load_secret_key(&russh_opts.key_path, russh_opts.key_password.as_deref())
+                        .map_err(|e| Box::new(crate::client::blocking_io::ssh::russh_transport::RusshError::Key(e.to_string()))
+                            as Box<dyn std::error::Error + Send + Sync>)?;
+                    let rt_handle = tokio::runtime::Handle::current();
+                    return Ok(Box::new(
+                        crate::client::blocking_io::ssh::russh_transport::RusshOnDemand::connect(
+                            url, key, options.version, options.trace, rt_handle,
+                        )
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?,
+                    ));
+                }
+                Box::new({
+                    crate::client::blocking_io::ssh::connect(url, options.version, options.ssh, options.trace)
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
+                })
+            }
             gix_url::Scheme::Git => {
                 if url.user().is_some() {
                     return Err(Error::UnsupportedUrlTokens {

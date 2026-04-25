@@ -99,6 +99,8 @@ impl<'repo> Remote<'repo> {
                     .then(|| self.repo.ssh_connect_options())
                     .transpose()?
                     .unwrap_or_default(),
+                #[cfg(feature = "russh-client")]
+                russh: None, // TODO: configure from repo config or environment
                 trace: self.repo.config.trace_packet(),
             },
         )

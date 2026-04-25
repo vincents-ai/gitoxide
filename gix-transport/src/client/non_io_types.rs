@@ -41,6 +41,10 @@ pub(crate) mod connect {
         #[cfg(feature = "blocking-client")]
         /// Options to use if the scheme of the URL is `ssh`.
         pub ssh: crate::client::blocking_io::ssh::connect::Options,
+        #[cfg(feature = "russh-client")]
+        /// Options for native russh SSH transport. If set, SSH connections use russh instead of
+        /// shelling out to the `ssh` binary.
+        pub russh: Option<crate::client::blocking_io::ssh::russh_transport::RusshConnectOptions>,
         /// If `true`, all packetlines received or sent will be passed to the facilities of the `gix-trace` crate.
         pub trace: bool,
     }

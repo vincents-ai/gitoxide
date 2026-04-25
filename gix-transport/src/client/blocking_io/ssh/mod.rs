@@ -38,6 +38,11 @@ pub enum ProgramKind {
 
 mod program_kind;
 
+#[cfg(feature = "russh-client")]
+pub mod russh_transport;
+#[cfg(feature = "russh-client")]
+pub use russh_transport::{RusshOnDemand, RusshError, RusshConnectOptions};
+
 ///
 pub mod invocation {
     use std::ffi::OsString;

@@ -229,6 +229,11 @@ blocking-network-client = [
     "attributes",
     "credentials",
 ]
+## Stacks with `blocking-network-client` to use native russh for SSH instead of shelling out to the `ssh` binary.
+russh-client = [
+    "blocking-network-client",
+    "gix-transport?/russh-client",
+]
 ## Stacks with `blocking-network-client` to provide support for HTTP/S using **curl**, and implies blocking networking as a whole, making the `https://` transport available.
 blocking-http-transport-curl = [
     "blocking-network-client",

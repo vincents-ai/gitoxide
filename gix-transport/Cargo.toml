@@ -53,6 +53,11 @@ http-client-reqwest-rust-tls-trust-dns = [
 http-client-reqwest-native-tls = ["http-client-reqwest", "reqwest/native-tls"]
 ## Allows sending credentials over cleartext HTTP. For testing purposes only.
 http-client-insecure-credentials = []
+## If set, use pure-Rust `russh` for SSH connections instead of shelling out to the `ssh` binary.
+## This enables SSH transport on platforms without an `ssh` binary (Android, iOS, WASI) and eliminates
+## the dependency on native SSH executables.
+## Implies `blocking-client`.
+russh-client = ["blocking-client", "dep:russh", "dep:tokio"]
 ## If set, an async implementations of the git transports becomes available in `crate::client::async_io`.
 ## Suitable for implementing your own transports while using git's way of communication, typically in conjunction with a custom server.
 ## **Note** that the _blocking_ client has a wide range of available transports, with the _async_ version of it supporting only the TCP based `git` transport leaving you
@@ -115,6 +120,10 @@ base64 = { version = "0.22.1", optional = true }
 # for http-client-curl. Additional configuration should be performed on higher levels of the dependency tree.
 curl = { version = "0.4", optional = true, default-features = false }
 
+# for russh-client — pure Rust SSH transport
+russh = { version = "0.60", optional = true, default-features = false }
+tokio = { version = "1.40", optional = true, features = ["rt-multi-thread"] }
+
 # for http-client-reqwest
 # all but the 'default-tls' feature
 reqwest = { version = "0.13.2", optional = true, default-features = false, features = ["blocking", "charset", "http2"] }
@@ -133,6 +142,7 @@ gix-hash = { path = "../gix-hash", features = ["sha1"] }
 async-std = { version = "1.9.0", features = ["attributes"] }
 maybe-async = "0.2.6"
 blocking = "1.6.2"
+tokio = { version = "1.40", features = ["rt-multi-thread"] }
 
 [package.metadata.docs.rs]
 features = ["http-client-curl", "document-features", "serde"]
