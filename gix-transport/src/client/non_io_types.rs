@@ -32,7 +32,8 @@ pub enum MessageKind {
 }
 
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
-pub(crate) mod connect {
+/// Options for connecting to a remote.
+pub mod connect {
     /// Options for connecting to a remote.
     #[derive(Debug, Default, Clone)]
     pub struct Options {

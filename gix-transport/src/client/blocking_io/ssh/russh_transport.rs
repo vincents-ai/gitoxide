@@ -147,7 +147,7 @@ impl Handler for KnownHostsHandler {
                 );
                 Ok(false)
             }
-            Err(e) => {
+            Err(_e) => {
                 // Key mismatch — possible MITM attack
                 gix_features::trace::error!(
                     "Host key verification failed for {}:{}: {}",
