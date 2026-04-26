@@ -32,9 +32,26 @@ use crate::{Protocol, Service};
 /// Shared state for an SSH channel, wrapped in `Arc<Mutex>` so reader and writer
 /// can operate independently while sharing the same underlying channel.
 struct SharedChannel {
-    channel: russh::Channel<russh::client::Msg>,
+    channel: Option<russh::Channel<russh::client::Msg>>,
     read_buffer: Vec<u8>,
     rt_handle: Handle,
+}
+
+impl Drop for SharedChannel {
+    fn drop(&mut self) {
+        // Send SSH_MSG_CHANNEL_EOF followed by SSH_MSG_CHANNEL_CLOSE
+        // so the server's upload-pack handler unblocks and exits cleanly.
+        // Without this, the server handler blocks forever waiting for
+        // client input after the ref advertisement is read.
+        if let Some(channel) = self.channel.take() {
+            let rt_handle = self.rt_handle.clone();
+            // Spawn a best-effort task — don't block the drop path
+            let _ = rt_handle.spawn(async move {
+                let _ = channel.eof().await;
+                let _ = channel.close().await;
+            });
+        }
+    }
 }
 
 /// Synchronous reader over an SSH channel.
@@ -60,7 +77,9 @@ impl Read for ChannelReader {
 
         let msg = {
             let rt_handle = shared.rt_handle.clone();
-            let channel = &mut shared.channel;
+            let channel = shared.channel.as_mut().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::ConnectionReset, "SSH channel already closed")
+            })?;
             rt_handle.block_on(async { channel.wait().await })
         };
 
@@ -83,9 +102,12 @@ impl Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let shared = self.shared.lock().unwrap();
         let cursor = Cursor::new(buf.to_vec());
+        let channel = shared.channel.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "SSH channel already closed")
+        })?;
         shared
             .rt_handle
-            .block_on(async { shared.channel.data(cursor).await })
+            .block_on(async { channel.data(cursor).await })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e.to_string()))?;
 
         Ok(buf.len())
@@ -313,7 +335,7 @@ impl Transport for RusshOnDemand {
 
         // Create the shared channel state and split into reader/writer
         let shared = Arc::new(Mutex::new(SharedChannel {
-            channel: pre.channel,
+            channel: Some(pre.channel),
             read_buffer: Vec::new(),
             rt_handle: pre.rt_handle,
         }));
