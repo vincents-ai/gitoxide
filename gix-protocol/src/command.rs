@@ -12,6 +12,7 @@ impl Command {
         match self {
             Command::LsRefs => "ls-refs",
             Command::Fetch => "fetch",
+            Command::Push => "push",
         }
     }
 }
@@ -53,12 +54,14 @@ mod with_io {
                     // wait-for-done feature
                     "wait-for-done",
                 ],
+                Command::Push => &["src-ref ", "report-status", "side-band-64k", "thin-pack"],
             }
         }
 
         fn all_features(&self, version: gix_transport::Protocol) -> &'static [&'static str] {
             match self {
                 Command::LsRefs => &[],
+                Command::Push => &[],
                 Command::Fetch => match version {
                     gix_transport::Protocol::V0 | gix_transport::Protocol::V1 => &[
                         "multi_ack",
@@ -109,6 +112,7 @@ mod with_io {
                     )
                     .collect(),
                 Command::LsRefs => vec![b"symrefs".as_bstr().to_owned(), b"peel".as_bstr().to_owned()],
+                Command::Push => vec![],
             }
         }
 
@@ -156,6 +160,7 @@ mod with_io {
                     }
                 },
                 Command::LsRefs => vec![],
+                Command::Push => vec![],
             }
         }
         /// Return an error if the given `arguments` and `features` don't match what's statically known.

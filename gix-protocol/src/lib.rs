@@ -30,6 +30,8 @@ pub enum Command {
     LsRefs,
     /// Fetch a pack.
     Fetch,
+    /// Push objects to the server.
+    Push,
 }
 pub mod command;
 
@@ -49,6 +51,11 @@ pub use maybe_async;
 pub mod fetch;
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use fetch::function::fetch;
+
+///
+pub mod push;
+#[cfg(any(feature = "blocking-client", feature = "async-client"))]
+pub use push::function::push;
 
 mod remote_progress;
 pub use remote_progress::RemoteProgress;
