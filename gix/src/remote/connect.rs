@@ -100,7 +100,16 @@ impl<'repo> Remote<'repo> {
                     .transpose()?
                     .unwrap_or_default(),
                 #[cfg(feature = "russh-client")]
-                russh: None, // TODO: configure from repo config or environment
+                russh: scheme_is_ssh.then(|| {
+                    // Try to load russh key from environment
+                    std::env::var("ENGRAM_SSH_KEY").ok().map(|key_path| {
+                        gix_transport::client::blocking_io::ssh::russh_transport::RusshConnectOptions {
+                            key_path: key_path.into(),
+                            key_password: std::env::var("ENGRAM_SSH_KEY_PASSWORD").ok(),
+                            accept_unknown_hosts: std::env::var("ENGRAM_SSH_ACCEPT_UNKNOWN").map(|v| v == "1" || v == "true").unwrap_or(false),
+                        }
+                    })
+                }).flatten(),
                 trace: self.repo.config.trace_packet(),
             },
         )
