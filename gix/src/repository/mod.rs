@@ -56,6 +56,7 @@ mod revision;
 mod shallow;
 mod state;
 #[cfg(feature = "attributes")]
+mod pack;
 mod submodule;
 mod thread_safe;
 mod worktree;

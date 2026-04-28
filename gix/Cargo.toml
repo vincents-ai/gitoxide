@@ -396,6 +396,7 @@ gix-traverse = { version = "^0.57.0", path = "../gix-traverse" }
 gix-diff = { version = "^0.63.0", path = "../gix-diff", default-features = false }
 gix-merge = { version = "^0.16.0", path = "../gix-merge", default-features = false, optional = true }
 gix-mailmap = { version = "^0.33.0", path = "../gix-mailmap", optional = true }
+flate2 = "1.1"
 gix-features = { version = "^0.48.0", path = "../gix-features", features = [
     "progress",
     "once_cell",
