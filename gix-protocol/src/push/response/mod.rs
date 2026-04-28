@@ -1,7 +1,7 @@
 //! Push response — parse the server's status report after receiving the packfile.
 
 use bstr::ByteSlice;
-use gix_transport::client::blocking_io::ExtendedBufRead;
+use crate::transport::client::blocking_io::ExtendedBufRead;
 
 use crate::push::Status;
 

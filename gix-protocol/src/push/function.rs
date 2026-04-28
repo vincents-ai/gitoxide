@@ -3,14 +3,13 @@
 use std::io::Write;
 
 use gix_features::progress::Progress;
-use gix_transport::{
-    client::{
-        self,
-        blocking_io::Transport,
-        MessageKind, WriteMode,
-    },
-    Service,
-};
+
+#[cfg(feature = "async-client")]
+use crate::transport::client::async_io::Transport;
+#[cfg(feature = "blocking-client")]
+use crate::transport::client::blocking_io::Transport;
+
+use crate::transport::{client::MessageKind, Service};
 use maybe_async::maybe_async;
 
 use crate::push::{Arguments, Outcome, RefUpdate, Response, Status};
@@ -22,7 +21,7 @@ pub enum Error {
     #[error("IO error during push")]
     Io(#[from] std::io::Error),
     #[error("Transport error")]
-    Transport(#[from] client::Error),
+    Transport(#[from] crate::transport::client::Error),
     #[error("Handshake error")]
     Handshake(#[from] crate::handshake::Error),
     #[error("Response parse error")]
@@ -33,7 +32,7 @@ pub enum Error {
     EmptyUpdate,
 }
 
-impl gix_transport::IsSpuriousError for Error {
+impl crate::transport::IsSpuriousError for Error {
     fn is_spurious(&self) -> bool {
         match self {
             Error::Io(err) => err.is_spurious(),
@@ -74,8 +73,8 @@ impl Default for Options {
 pub async fn push<P, T>(
     mut transport: T,
     authenticate: impl FnMut(
-        gix_credentials::helper::Action,
-    ) -> gix_credentials::protocol::Result,
+        crate::credentials::helper::Action,
+    ) -> crate::credentials::protocol::Result,
     ref_updates: Vec<RefUpdate>,
     pack_data: &[u8],
     mut progress: P,
@@ -115,7 +114,7 @@ where
     // on_into_read = Flush to send a final flush when converting to reader.
     progress.step();
     let mut writer = transport.request(
-        WriteMode::Binary,
+        crate::transport::client::WriteMode::Binary,
         MessageKind::Flush,
         options.trace,
     )?;
