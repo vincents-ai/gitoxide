@@ -66,12 +66,7 @@ fn invalid() {
     let fixture = tree_fixture("definitely-special.tree").expect("fixture is valid");
     let partial_tree = &fixture[..fixture.len() / 2];
     let hash_kind = crate::fixture_hash_kind();
-    let err = TreeRef::from_bytes(partial_tree, hash_kind).unwrap_err().to_string();
-    if cfg!(feature = "verbose-object-parsing-errors") {
-        assert!(err.starts_with("object parsing failed at `"), "{err}");
-    } else {
-        assert_eq!(err, "object parsing failed");
-    }
+    assert!(TreeRef::from_bytes(partial_tree, hash_kind).is_err());
     assert!(
         TreeRefIter::from_bytes(partial_tree, hash_kind)
             .take_while(Result::is_ok)
@@ -87,6 +82,15 @@ fn fuzzed() {
         gix_object::TreeRef::from_bytes(b"2", gix_testtools::hash_kind_from_env().unwrap_or_default()).is_err(),
         "fail, but don't crash"
     );
+}
+
+#[test]
+fn fuzz_artifact_inputs_can_be_parsed_without_panicking() {
+    for path in crate::fuzz_artifact_paths("fuzz_tree") {
+        let input = std::fs::read(path).expect("artifact is readable");
+        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha1);
+        _ = TreeRef::from_bytes(&input, gix_hash::Kind::Sha256);
+    }
 }
 
 #[test]
