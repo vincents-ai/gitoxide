@@ -52,7 +52,8 @@ pub mod fetch;
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use fetch::function::fetch;
 
-///
+/// Push protocol support (requires blocking-client or async-client feature)
+#[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub mod push;
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use push::function::push;
