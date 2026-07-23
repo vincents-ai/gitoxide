@@ -93,6 +93,27 @@ impl Read for ChannelReader {
                 Ok(len)
             }
             Some(ChannelMsg::Eof) | None => Ok(0),
+            // Benign messages the server sends during a git session that carry
+            // no data on stdout (the channel's primary stream). We must not
+            // error on them — a git-receive-pack run sends ExtendedData (stderr
+            // "remote: ..." progress), WindowAdjusted, ExitStatus, etc.
+            // Loop and wait for the next message.
+            Some(
+                ChannelMsg::ExtendedData { .. }
+                | ChannelMsg::WindowAdjusted { .. }
+                | ChannelMsg::ExitStatus { .. }
+                | ChannelMsg::ExitSignal { .. }
+                | ChannelMsg::Success
+                | ChannelMsg::Failure
+                | ChannelMsg::Close
+                | ChannelMsg::XonXoff { .. },
+            ) => {
+                // Drop the channel borrow (the `block_on` above already released
+                // it) and recurse to read the next message. This keeps the SSH
+                // session progressing without surfacing these as IO errors.
+                drop(shared);
+                self.read(buf)
+            }
             _ => Err(std::io::Error::other("Unexpected SSH channel message")),
         }
     }

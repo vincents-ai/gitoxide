@@ -109,9 +109,10 @@ where
         handshake_result.server_protocol_version,
     );
 
-    // Step 2: Open a request writer for sending ref commands + pack
-    // Use Binary mode so we can write raw data alongside pkt-line data.
-    // on_into_read = Flush to send a final flush when converting to reader.
+    // Step 2: Open a request writer for sending ref commands.
+    // Binary mode frames each write() as a packet line — correct for the
+    // ref-update commands, which must be pkt-line encoded in V1.
+    // on_into_read is unused: we dissolve into parts to write the pack raw.
     progress.step();
     let mut writer = transport.request(
         crate::transport::client::WriteMode::Binary,
@@ -119,28 +120,35 @@ where
         options.trace,
     )?;
 
-    // Write ref update commands as pkt-line text
-    let encoded_args = arguments.encode();
-    // Write the encoded args directly using the Write trait
-    // (RequestWriter in binary mode writes raw bytes)
-    writer.write_all(&encoded_args)?;
-    writer.flush()?;
-    // Flush after ref commands
+    // Write each ref-update command as its own packet line.
+    // encode() yields one command per entry; emit them individually so each
+    // is framed as a distinct pkt-line (V1: one ref-update command per line).
+    for command in arguments.encode_lines() {
+        writer.write_all(&command)?;
+        writer.flush()?;
+    }
+    // Flush after the ref commands.
     writer.write_message(MessageKind::Flush)?;
     writer.flush()?;
 
-    // Step 3: Send packfile data as binary
-    if !pack_data.is_empty() {
+    // Step 3: Send the packfile as RAW bytes (not pkt-line encoded).
+    // V1 git-receive-pack expects commands+flush, then the packfile verbatim.
+    // into_parts() yields a writer that writes verbatim (no packetline framing)
+    // plus the response reader. The writer MUST be dropped before reading.
+    let reader = if pack_data.is_empty() {
+        writer.into_read()?
+    } else {
         progress.step();
-        // In binary mode, write() sends raw bytes (not pkt-line encoded)
-        writer.write_all(pack_data)?;
-        writer.flush()?;
-    }
+        let (mut raw_writer, reader) = writer.into_parts();
+        raw_writer.write_all(pack_data)?;
+        raw_writer.flush()?;
+        drop(raw_writer);
+        reader
+    };
 
-    // Step 4: Convert writer to reader and parse status report
+    // Step 4: Parse the server's status report.
     progress.step();
     let ref_statuses = if arguments.report_status() {
-        let reader = writer.into_read()?;
         let response = Response::from_blocking_reader(reader)?;
         response.ref_statuses
     } else {

@@ -110,4 +110,40 @@ impl Arguments {
     pub fn updates(&self) -> &[RefUpdate] {
         &self.updates
     }
+
+    /// Encode each ref-update command as its own byte vector (one per line),
+    /// with the first carrying the NUL-separated capabilities.
+    /// The caller frames each entry as a single packet line.
+    pub fn encode_lines(&self) -> Vec<Vec<u8>> {
+        let null_hash = ObjectId::null(gix_hash::Kind::Sha1);
+        let mut out = Vec::with_capacity(self.updates.len());
+
+        for (i, update) in self.updates.iter().enumerate() {
+            let old = if update.old_id == null_hash {
+                ObjectId::null(gix_hash::Kind::Sha1).to_hex().to_string()
+            } else {
+                update.old_id.to_hex().to_string()
+            };
+            let new = if update.new_id == null_hash {
+                ObjectId::null(gix_hash::Kind::Sha1).to_hex().to_string()
+            } else {
+                update.new_id.to_hex().to_string()
+            };
+
+            let mut line = Vec::new();
+            line.extend_from_slice(format!("{old} {new} ").as_bytes());
+            line.extend_from_slice(update.name.as_slice());
+            if i == 0 {
+                line.push(0); // NUL separator before capabilities
+                // Request report-status (plain pkt-line report, no side-band mux).
+                // The response reader in push::response does not demultiplex side-band
+                // frames, so requesting side-band-64k would make the report arrive
+                // channel-tagged and unparseable. report-status alone suffices.
+                line.extend_from_slice(b"report-status");
+            }
+            line.push(b'\n');
+            out.push(line);
+        }
+        out
+    }
 }
