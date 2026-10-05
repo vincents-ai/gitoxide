@@ -253,7 +253,7 @@ where
                                 let mut state = new_thread_state(thread_id);
                                 let res = (|| {
                                     while let Ok(input_index) =
-                                        index.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
+                                        index.try_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
                                             (x < input_len).then_some(x + 1)
                                         })
                                     {

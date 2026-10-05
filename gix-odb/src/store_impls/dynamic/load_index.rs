@@ -110,7 +110,7 @@ impl super::Store {
             'retry_with_next_slot_index: loop {
                 match index
                     .next_index_to_load
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                         (current != index.slot_indices.len()).then_some(current + 1)
                     }) {
                     Ok(slot_map_index) => {

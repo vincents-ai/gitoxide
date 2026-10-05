@@ -367,7 +367,7 @@ fn keep_going_collects_results() {
         None,
         |_id| {
             count
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                     (current < 2).then_some(current + 1)
                 })
                 .is_err()

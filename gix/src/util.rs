@@ -80,7 +80,7 @@ pub fn parallel_iter_drop<T, U, V>(
     // take very long even with huge trees.
     // If this every becomes a problem, just make `index::from-tree` interruptible, and keep waiting for handles here.
     drop((maybe_handle, handle));
-    undo.fetch_update(
+    undo.try_update(
         std::sync::atomic::Ordering::SeqCst,
         std::sync::atomic::Ordering::SeqCst,
         |current| current.then_some(prev),
