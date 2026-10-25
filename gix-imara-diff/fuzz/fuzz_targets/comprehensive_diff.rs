@@ -1,9 +1,13 @@
 #![no_main]
 
 use imara_diff::{Algorithm, Diff, InternedInput};
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{Corpus, fuzz_target};
 
-use libfuzzer_sys::arbitrary;
+use libfuzzer_sys::arbitrary::{self, Arbitrary, Unstructured};
+
+/// Keep libFuzzer from spending its whole timeout budget in Myers on oversized,
+/// repetitive inputs while preserving room for historical regression fixtures.
+const MAX_FUZZ_INPUT_BYTES: usize = 150 * 1024;
 
 #[derive(arbitrary::Arbitrary, Debug)]
 struct Input<'a> {
@@ -28,7 +32,7 @@ fn do_fuzz(
     }: Input<'_>,
 ) {
     // Create interned input
-    let input = InternedInput::new(before, after);
+    let mut input = InternedInput::new(before, after);
 
     // Test all three diff algorithms
     for algorithm in [
@@ -36,6 +40,11 @@ fn do_fuzz(
         Algorithm::Myers,
         Algorithm::MyersMinimal,
     ] {
+        // Keep quadratic minimal diffs within the fuzz timeout.
+        if algorithm == Algorithm::MyersMinimal {
+            input.before.truncate(512);
+            input.after.truncate(512);
+        }
         // Compute diff
         let mut diff = Diff::compute(algorithm, &input);
 
@@ -67,6 +76,15 @@ fn do_fuzz(
     }
 }
 
-fuzz_target!(|input: Input<'_>| {
+fuzz_target!(|data: &[u8]| -> Corpus {
+    if data.len() > MAX_FUZZ_INPUT_BYTES {
+        return Corpus::Reject;
+    }
+
+    let Ok(input) = Input::arbitrary_take_rest(Unstructured::new(data)) else {
+        return Corpus::Reject;
+    };
+
     do_fuzz(input);
+    Corpus::Keep
 });

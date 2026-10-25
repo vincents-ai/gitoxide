@@ -1,5 +1,54 @@
+#[test]
+fn cancellation_is_intrinsically_classified_and_failure_sources_survive() {
+    use gix_error::ErrorExt;
+
+    let err = gix_diff::tree::Error::Cancelled;
+    assert!(
+        gix_error::classify(&err).is_cancelled(),
+        "every cancellation construction is classified"
+    );
+    let err = err.raise();
+    assert!(
+        !err.is_retryable() && !err.can_retry(),
+        "cancellation stops rather than retries"
+    );
+    assert!(
+        err.downcast_any_ref::<gix_diff::tree::Error>().is_some(),
+        "the concrete variant survives"
+    );
+
+    let err =
+        gix_diff::tree::Error::Failure(std::io::Error::new(std::io::ErrorKind::TimedOut, "lookup timed out").raise())
+            .raise();
+    assert!(!err.is_cancelled(), "ordinary failures are not cancellation");
+    assert!(err.can_retry(), "the callee's retry semantics survive");
+    assert!(
+        err.downcast_any_ref::<std::io::Error>().is_some(),
+        "the original I/O source survives"
+    );
+}
+
+#[test]
+fn cancellation_vetoes_sibling_retryable_failures() {
+    use gix_error::ErrorExt;
+
+    let err = gix_error::retryable("transient lookup failure")
+        .raise_typed()
+        .chain(gix_diff::tree::Error::Cancelled)
+        .into_error();
+    assert!(
+        err.is_retryable() && err.is_cancelled(),
+        "both sibling classifications survive"
+    );
+    assert!(
+        !err.can_retry() && !err.can_retry_lenient(),
+        "delegate cancellation vetoes both policies even after a retryable sibling"
+    );
+}
+
 mod changes {
     mod to_obtain_tree {
+        use crate::Result;
         use std::collections::HashMap;
 
         use gix_diff::tree::{
@@ -7,17 +56,17 @@ mod changes {
             recorder::{Change::*, Location},
             visit::Relation,
         };
-        use gix_hash::{oid, ObjectId};
-        use gix_object::{bstr::ByteSlice, tree::EntryKind, TreeRefIter};
+        use gix_hash::{ObjectId, oid};
+        use gix_object::{TreeRefIter, bstr::ByteSlice, tree::EntryKind};
         use gix_odb::pack::Find;
 
         use crate::hex_to_id;
 
         type Changes = Vec<recorder::Change>;
 
-        fn db(args: impl IntoIterator<Item = &'static str>) -> crate::Result<gix_odb::Handle> {
+        fn db(args: impl IntoIterator<Item = &'static str>) -> Result<gix_odb::Handle> {
             crate::open_odb(
-                gix_testtools::scripted_fixture_read_only_with_args_standalone("make_diff_repo.sh", args)?
+                crate::scripted_fixture_read_only_with_args("make_diff_repo.sh", args)?
                     .join(".git")
                     .join("objects"),
             )
@@ -28,7 +77,7 @@ mod changes {
             db: &gix_odb::Handle,
             commit: &oid,
             buf: &'a mut Vec<u8>,
-        ) -> crate::Result<TreeRefIter<'a>> {
+        ) -> Result<TreeRefIter<'a>> {
             let tree_id = db
                 .try_find(commit, buf)?
                 .ok_or_else(|| format!("start commit {commit:?} to be present"))?
@@ -51,7 +100,7 @@ mod changes {
             lhs: impl Into<Option<ObjectId>>,
             rhs: &oid,
             location: Option<Location>,
-        ) -> crate::Result<Changes> {
+        ) -> Result<Changes> {
             let mut buf = Vec::new();
             let lhs_tree = lhs
                 .into()
@@ -69,7 +118,7 @@ mod changes {
             Ok(recorder.records)
         }
 
-        fn diff_with_previous_commit_from(db: &gix_odb::Handle, commit_id: &oid) -> crate::Result<Changes> {
+        fn diff_with_previous_commit_from(db: &gix_odb::Handle, commit_id: &oid) -> Result<Changes> {
             let mut buf = Vec::new();
             let (main_tree_id, parent_commit_id) = {
                 let commit = db
@@ -80,10 +129,7 @@ mod changes {
                     .into_commit()
                     .expect("id is actually a commit");
 
-                (commit.tree(), {
-                    let p = commit.parents().next();
-                    p
-                })
+                (commit.tree(), commit.parents().next())
             };
             let current_tree = db
                 .try_find(&main_tree_id, &mut buf)?
@@ -136,7 +182,7 @@ mod changes {
 
             let head = head_of(db);
             gix_traverse::commit::Simple::new(Some(head), &db)
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<std::result::Result<Vec<_>, _>>()
                 .expect("valid iteration")
                 .into_iter()
                 .map(|c| {
@@ -156,14 +202,17 @@ mod changes {
         }
 
         #[test]
-        fn many_different_states() -> crate::Result {
+        fn many_different_states() -> gix_testtools::TestResult {
             let db = db(None)?;
             let all_commits = all_commits(&db);
             pretty_assertions::assert_eq!(
                 diff_with_previous_commit_from(&db, &all_commits["f added"])?,
                 vec![Addition {
                     entry_mode: EntryKind::Blob.into(),
-                    oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                    oid: hex_to_id(
+                        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                        "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                    ),
                     path: "f".into(),
                     relation: None
                 }],
@@ -174,9 +223,15 @@ mod changes {
                 diff_with_previous_commit_from(&db, &all_commits["f modified"])?,
                 vec![Modification {
                     previous_entry_mode: EntryKind::Blob.into(),
-                    previous_oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                    previous_oid: hex_to_id(
+                        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                        "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                    ),
                     entry_mode: EntryKind::Blob.into(),
-                    oid: hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242", "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"),
+                    oid: hex_to_id(
+                        "28ce6a8b26aa170e1de65536fe8abe1832bd3242",
+                        "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"
+                    ),
                     path: "f".into()
                 }],
                 ":100644 100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 28ce6a8b26aa170e1de65536fe8abe1832bd3242 M      f"
@@ -250,16 +305,28 @@ mod changes {
                 vec![
                     Modification {
                         previous_entry_mode: EntryKind::Tree.into(),
-                        previous_oid: hex_to_id("10f2f4b82222d2b5c31985130979a91fd87410f7", "9e220e584599b9cff376b638fa71675280f4582a87138b6be425258dbb85f94c"),
+                        previous_oid: hex_to_id(
+                            "10f2f4b82222d2b5c31985130979a91fd87410f7",
+                            "9e220e584599b9cff376b638fa71675280f4582a87138b6be425258dbb85f94c"
+                        ),
                         entry_mode: EntryKind::Tree.into(),
-                        oid: hex_to_id("ebbe0b3000afdfd1aed15000094b59a2800328eb", "ca3ee6fe1455fc077ae53f0fe7af54153feb35d52a892b1377e9c0b6828428d4"),
+                        oid: hex_to_id(
+                            "ebbe0b3000afdfd1aed15000094b59a2800328eb",
+                            "ca3ee6fe1455fc077ae53f0fe7af54153feb35d52a892b1377e9c0b6828428d4"
+                        ),
                         path: "f".into()
                     },
                     Modification {
                         previous_entry_mode: EntryKind::Blob.into(),
-                        previous_oid: hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242", "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"),
+                        previous_oid: hex_to_id(
+                            "28ce6a8b26aa170e1de65536fe8abe1832bd3242",
+                            "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"
+                        ),
                         entry_mode: EntryKind::Blob.into(),
-                        oid: hex_to_id("13c2aca72ab576cb5f22dc8e7f8ba8ddab553a8a", "ab879bd65609705434bab6bc157306769fd1053c6d86d82c89e76df9bee62809"),
+                        oid: hex_to_id(
+                            "13c2aca72ab576cb5f22dc8e7f8ba8ddab553a8a",
+                            "ab879bd65609705434bab6bc157306769fd1053c6d86d82c89e76df9bee62809"
+                        ),
                         path: "f/f".into()
                     },
                 ],
@@ -280,14 +347,20 @@ mod changes {
                 vec![
                     Modification {
                         previous_entry_mode: EntryKind::Tree.into(),
-                        previous_oid: hex_to_id("849bd76db90b65ebbd2e6d3970ca70c96ee5592c", "003781d2cca9a680f5ccfe0963614bb813dea1654968713b48a6a27490c3771e"),
+                        previous_oid: hex_to_id(
+                            "849bd76db90b65ebbd2e6d3970ca70c96ee5592c",
+                            "003781d2cca9a680f5ccfe0963614bb813dea1654968713b48a6a27490c3771e"
+                        ),
                         entry_mode: EntryKind::Tree.into(),
                         oid: tree_with_link_id,
                         path: "f".into()
                     },
                     Modification {
                         previous_entry_mode: EntryKind::Blob.into(),
-                        previous_oid: hex_to_id("13c2aca72ab576cb5f22dc8e7f8ba8ddab553a8a", "ab879bd65609705434bab6bc157306769fd1053c6d86d82c89e76df9bee62809"),
+                        previous_oid: hex_to_id(
+                            "13c2aca72ab576cb5f22dc8e7f8ba8ddab553a8a",
+                            "ab879bd65609705434bab6bc157306769fd1053c6d86d82c89e76df9bee62809"
+                        ),
                         entry_mode: link_entry_mode.into(),
                         oid: link_entry_oid,
                         path: "f/f".into()
@@ -340,13 +413,19 @@ mod changes {
                 vec![
                     Deletion {
                         entry_mode: EntryKind::Tree.into(),
-                        oid: hex_to_id("3d5a503f4062d198b443db5065ca727f8354e7df", "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"),
+                        oid: hex_to_id(
+                            "3d5a503f4062d198b443db5065ca727f8354e7df",
+                            "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"
+                        ),
                         path: "d".into(),
                         relation: Some(Relation::Parent(1))
                     },
                     Deletion {
                         entry_mode: EntryKind::Blob.into(),
-                        oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                        oid: hex_to_id(
+                            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                        ),
                         path: "d/f".into(),
                         relation: Some(Relation::ChildOfParent(1))
                     },
@@ -388,13 +467,19 @@ mod changes {
                 vec![
                     Addition {
                         entry_mode: EntryKind::Tree.into(),
-                        oid: hex_to_id("496d6428b9cf92981dc9495211e6e1120fb6f2ba", "5f6f307bcc469c02acba4f7da42d8d4defdda8209777fe732956f1e2fa0db3ff"),
+                        oid: hex_to_id(
+                            "496d6428b9cf92981dc9495211e6e1120fb6f2ba",
+                            "5f6f307bcc469c02acba4f7da42d8d4defdda8209777fe732956f1e2fa0db3ff"
+                        ),
                         path: "g".into(),
                         relation: Some(Relation::Parent(1))
                     },
                     Addition {
                         entry_mode: EntryKind::Blob.into(),
-                        oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                        oid: hex_to_id(
+                            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                        ),
                         path: "g/a".into(),
                         relation: Some(Relation::ChildOfParent(1))
                     },
@@ -521,7 +606,7 @@ mod changes {
         }
 
         #[test]
-        fn many_different_states_nested() -> crate::Result {
+        fn many_different_states_nested() -> gix_testtools::TestResult {
             let db = db(["a"].iter().copied())?;
             let all_commits = all_commits(&db);
 
@@ -530,13 +615,19 @@ mod changes {
                 vec![
                     Addition {
                         entry_mode: EntryKind::Tree.into(),
-                        oid: hex_to_id("3d5a503f4062d198b443db5065ca727f8354e7df", "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"),
+                        oid: hex_to_id(
+                            "3d5a503f4062d198b443db5065ca727f8354e7df",
+                            "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"
+                        ),
                         path: "a".into(),
                         relation: Some(Relation::Parent(1)),
                     },
                     Addition {
                         entry_mode: EntryKind::Blob.into(),
-                        oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                        oid: hex_to_id(
+                            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                        ),
                         path: "a/f".into(),
                         relation: Some(Relation::ChildOfParent(1)),
                     }
@@ -548,16 +639,28 @@ mod changes {
                 vec![
                     Modification {
                         previous_entry_mode: EntryKind::Tree.into(),
-                        previous_oid: hex_to_id("3d5a503f4062d198b443db5065ca727f8354e7df", "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"),
+                        previous_oid: hex_to_id(
+                            "3d5a503f4062d198b443db5065ca727f8354e7df",
+                            "1f5422fc234c61cf503a86521bcafcb86cc48653c5d80d4e93a6cc677e345b40"
+                        ),
                         entry_mode: EntryKind::Tree.into(),
-                        oid: hex_to_id("10f2f4b82222d2b5c31985130979a91fd87410f7", "9e220e584599b9cff376b638fa71675280f4582a87138b6be425258dbb85f94c"),
+                        oid: hex_to_id(
+                            "10f2f4b82222d2b5c31985130979a91fd87410f7",
+                            "9e220e584599b9cff376b638fa71675280f4582a87138b6be425258dbb85f94c"
+                        ),
                         path: "a".into()
                     },
                     Modification {
                         previous_entry_mode: EntryKind::Blob.into(),
-                        previous_oid: hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"),
+                        previous_oid: hex_to_id(
+                            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                            "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                        ),
                         entry_mode: EntryKind::Blob.into(),
-                        oid: hex_to_id("28ce6a8b26aa170e1de65536fe8abe1832bd3242", "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"),
+                        oid: hex_to_id(
+                            "28ce6a8b26aa170e1de65536fe8abe1832bd3242",
+                            "6ca8d4e3bc5df874055e542d18505b5a5efa0fb7d65776efedc13781073ed0f1"
+                        ),
                         path: "a/f".into()
                     }
                 ],
@@ -574,7 +677,7 @@ mod changes {
         }
 
         #[test]
-        fn maximal_difference() -> crate::Result {
+        fn maximal_difference() -> gix_testtools::TestResult {
             let db = db(None)?;
             let all_commits = all_commits(&db);
 
@@ -640,7 +743,7 @@ mod changes {
         }
 
         #[test]
-        fn maximal_difference_nested() -> crate::Result {
+        fn maximal_difference_nested() -> gix_testtools::TestResult {
             let db = db(["a"].iter().copied())?;
             let all_commits = all_commits(&db);
             let empty_blob_id = hex_to_id(
@@ -711,7 +814,7 @@ mod changes {
         }
 
         #[test]
-        fn directory_rename() -> crate::Result {
+        fn directory_rename() -> gix_testtools::TestResult {
             let db = db(None)?;
             let all_commits = all_commits(&db);
             let empty_blob_id = hex_to_id(
@@ -800,7 +903,7 @@ mod changes {
         }
 
         #[test]
-        fn reverse_directory_rename() -> crate::Result {
+        fn reverse_directory_rename() -> gix_testtools::TestResult {
             let db = db(None)?;
             let all_commits = all_commits(&db);
             let empty_blob_id = hex_to_id(

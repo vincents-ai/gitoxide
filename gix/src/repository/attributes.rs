@@ -1,21 +1,25 @@
 //! exclude information
-use crate::{config, AttributeStack, Repository};
 
-/// The error returned by [`Repository::attributes()`].
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error(transparent)]
-    ConfigureAttributes(#[from] config::attribute_stack::Error),
-    #[error(transparent)]
-    ConfigureExcludes(#[from] config::exclude_stack::Error),
-}
+use crate::{AttributeStack, Repository, Result};
 
 impl Repository {
+    /// Return selected global attribute file paths in increasing precedence order: Git installation, system,
+    /// then `core.attributesFile` or the default user attribute file.
+    ///
+    /// Selection respects repository permissions and configuration path interpolation. Selected paths are included
+    /// even if the files do not exist. Per-directory `.gitattributes` and `$GIT_COMMON_DIR/info/attributes` are excluded;
+    /// obtain the latter by joining `info/attributes` to [`common_dir()`][Self::common_dir].
+    #[cfg(feature = "attributes")]
+    pub fn attribute_global_paths(&self) -> Result<Vec<std::path::PathBuf>> {
+        self.config
+            .attribute_global_paths(self.current_dir(), self.options.permissions.attributes)
+    }
+
     /// Configure a file-system cache for accessing git attributes *and* excludes on a per-path basis.
     ///
     /// Use `attribute_source` to specify where to read attributes from. Also note that exclude information will
-    /// always try to read `.gitignore` files from disk before trying to read it from the `index`.
+    /// always try to read `.gitignore` files from disk before trying to read it from the `index`,
+    /// configurable via `ignore_source`.
     ///
     /// Note that no worktree is required for this to work, even though access to in-tree `.gitattributes` and `.gitignore` files
     /// would require a non-empty `index` that represents a git tree.
@@ -31,7 +35,7 @@ impl Repository {
         attributes_source: gix_worktree::stack::state::attributes::Source,
         ignore_source: gix_worktree::stack::state::ignore::Source,
         exclude_overrides: Option<gix_ignore::Search>,
-    ) -> Result<AttributeStack<'_>, Error> {
+    ) -> Result<AttributeStack<'_>> {
         let case = if self.config.ignore_case {
             gix_glob::pattern::Case::Fold
         } else {
@@ -39,6 +43,7 @@ impl Repository {
         };
         let (attributes, mut buf) = self.config.assemble_attribute_globals(
             self.common_dir(),
+            self.current_dir(),
             attributes_source,
             self.options.permissions.attributes,
         )?;
@@ -66,7 +71,7 @@ impl Repository {
         &self,
         index: &gix_index::State,
         attributes_source: gix_worktree::stack::state::attributes::Source,
-    ) -> Result<AttributeStack<'_>, config::attribute_stack::Error> {
+    ) -> Result<AttributeStack<'_>> {
         let case = if self.config.ignore_case {
             gix_glob::pattern::Case::Fold
         } else {
@@ -74,6 +79,7 @@ impl Repository {
         };
         let (attributes, buf) = self.config.assemble_attribute_globals(
             self.common_dir(),
+            self.current_dir(),
             attributes_source,
             self.options.permissions.attributes,
         )?;
@@ -112,7 +118,7 @@ impl Repository {
         index: &gix_index::State,
         overrides: Option<gix_ignore::Search>,
         source: gix_worktree::stack::state::ignore::Source,
-    ) -> Result<AttributeStack<'_>, config::exclude_stack::Error> {
+    ) -> Result<AttributeStack<'_>> {
         let case = if self.config.ignore_case {
             gix_glob::pattern::Case::Fold
         } else {

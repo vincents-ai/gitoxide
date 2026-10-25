@@ -110,7 +110,7 @@ is usable to some extent.
   * [gix-commitgraph](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-commitgraph)
   * [gix-diff](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-diff)
   * [gix-traverse](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-traverse)
-  * [gix-features](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-features)
+  * [gix-parallel](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-parallel)
   * [gix-credentials](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-credentials)
   * [gix-sec](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-sec)
   * [gix-quote](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md#gix-quote)
@@ -181,6 +181,14 @@ See the [releases section][releases] for manual installation and various alterna
 on your needs, for _Linux_, _MacOS_ and _Windows_.
 
 [releases]: https://github.com/GitoxideLabs/gitoxide/releases
+
+### Install with Homebrew
+
+For macOS and Linux, `gitoxide` can be installed from [Homebrew](https://brew.sh):
+
+```sh
+brew install gitoxide
+```
 
 ### Download from Arch Linux repository
 
@@ -313,7 +321,7 @@ Project goals can change over time as we learn more, and they can be challenged.
    * assure reads never interfere with concurrent writes
    * assure multiple concurrent writes don't cause trouble
  * **take shortcuts, but not in quality**
-   * binaries may use `anyhow::Error` exhaustively, knowing these errors are solely user-facing.
+   * binaries use `gix::Result` and `gix::Error` to preserve error context and source locations, with helpers available through `gix::error` instead of a separate `gix-error` dependency.
    * libraries use light-weight custom errors implemented using `quick-error` or `thiserror`.
    * internationalization is nothing we are concerned with right now.
    * IO errors due to insufficient amount of open file handles don't always lead to operation failure
@@ -334,28 +342,19 @@ Project non-goals can change over time as we learn more, and they can be challen
  * **use async IO everywhere**
    * for the most part, git operations are heavily reliant on memory mapped IO as well as CPU to decompress data,
      which doesn't lend itself well to async IO out of the box.
-   * Use `blocking` as well as `gix-features::interrupt` to bring operations into the async world and to control
+   * Use `blocking` as well as `gix_utils::interrupt` to bring operations into the async world and to control
      long running operations.
    * When connecting or streaming over TCP connections, especially when receiving on the server, async seems like a must
      though, but behind a feature flag.
 
 ## Contributions
 
-If what you have seen so far sparked your interest to contribute, then let us say: We are happy to have you and help you to get started.
+If what you have seen so far sparked your interest to contribute, then let us say: We are happy to have you and help you to get started. What's paricularly welcome is the discovery of deviations from Git, or the prodding 
+and probing to find bugs and other forms of undesirable behaviour.
 
-We recommend running `just test` during the development process to assure CI is green before pushing.
+Please read the [contribution guide] before starting. It covers when prior discussion is required and how to prepare a submission.
 
-A backlog for work ready to be picked up is [available in the Project's Kanban board][project-board], which contains instructions on how
-to pick a task. If it's empty or you have other questions, feel free to [start a discussion][discussions] or reach out to @Byron [privately][keybase].
-
-For additional details, also take a look at the [collaboration guide]. If AI participates in a contribution, please
-follow the [AI disclosure requirements]. "Full-auto" contributions without a human on the other end may be closed unceremoniously.
-
-[AI disclosure requirements]: https://github.com/GitoxideLabs/gitoxide/blob/main/CONTRIBUTING.md#please-disclose-the-use-of-ai
-[collaboration guide]: https://github.com/GitoxideLabs/gitoxide/blob/main/COLLABORATING.md
-[project-board]: https://github.com/GitoxideLabs/gitoxide/projects
-[discussions]: https://github.com/GitoxideLabs/gitoxide/discussions
-[keybase]: https://keybase.io/byronbates
+[contribution guide]: https://github.com/GitoxideLabs/gitoxide/blob/main/CONTRIBUTING.md
 [cargo-diet]: https://crates.io/crates/cargo-diet
 
 ### Getting started with Video Tutorials

@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 
+use gix_error::{ErrorExt, Result};
 use smallvec::SmallVec;
 
-use crate::{parse, parse::ParseResult, BStr, ByteSlice, CommitRef};
+use crate::{BStr, ByteSlice, CommitRef, parse};
 
 /// Parse the commit message after the header/message separator.
 ///
@@ -11,12 +12,12 @@ use crate::{parse, parse::ParseResult, BStr, ByteSlice, CommitRef};
 /// separator newline and borrows all remaining bytes from `i`.
 ///
 /// On success, `i` is advanced to the empty suffix as commits end with a message.
-pub fn message<'a>(i: &mut &'a [u8]) -> ParseResult<&'a BStr> {
+pub fn message<'a>(i: &mut &'a [u8]) -> Result<&'a BStr> {
     if let Some(rest) = i.strip_prefix(parse::NL) {
         *i = &[];
         Ok(rest.as_bstr())
     } else {
-        Err(crate::decode::Error)
+        Err(crate::decode::empty_error().raise())
     }
 }
 
@@ -37,13 +38,13 @@ pub fn message<'a>(i: &mut &'a [u8]) -> ParseResult<&'a BStr> {
 /// This parser is not transactional as a whole: if a later required field or
 /// the final message parse fails, `i` may already have been advanced past
 /// earlier successfully parsed fields.
-pub fn commit<'a>(i: &mut &'a [u8], hash_kind: gix_hash::Kind) -> ParseResult<CommitRef<'a>> {
-    let tree = parse::header_field(i, b"tree", |value| parse::hex_hash(value, hash_kind))?;
+pub fn commit<'a>(i: &mut &'a [u8], object_hash: gix_hash::Kind) -> Result<CommitRef<'a>> {
+    let tree = parse::header_field(i, b"tree", |value| parse::hex_hash(value, object_hash))?;
 
     let mut parents = SmallVec::new();
     loop {
         let before = *i;
-        match parse::header_field(i, b"parent", |value| parse::hex_hash(value, hash_kind)) {
+        match parse::header_field(i, b"parent", |value| parse::hex_hash(value, object_hash)) {
             Ok(parent) => parents.push(parent),
             Err(_) => {
                 *i = before;
@@ -82,9 +83,7 @@ pub fn commit<'a>(i: &mut &'a [u8], hash_kind: gix_hash::Kind) -> ParseResult<Co
     }
 
     let message = message(i)?;
-    if !i.is_empty() {
-        return Err(crate::decode::Error);
-    }
+    gix_error::ensure!(i.is_empty(), crate::decode::empty_error());
 
     Ok(CommitRef {
         tree,

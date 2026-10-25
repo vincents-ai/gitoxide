@@ -1,15 +1,16 @@
+use gix_testtools::TestResult;
 use std::path::Path;
 
 use bstr::BStr;
 use gix_pathspec::search::MatchKind::*;
 
 #[test]
-fn directories() -> crate::Result {
-    baseline::run("directory", true, baseline::directories)
+fn directories() -> TestResult {
+    baseline::run("directory", true, baseline::directories).map_err(Into::into)
 }
 
 #[test]
-fn directory_matches_prefix() -> crate::Result {
+fn directory_matches_prefix() -> TestResult {
     for spec in ["dir", "dir/", "di*", "dir/*", "dir/*.o"] {
         for specs in [&[spec] as &[_], &[spec, "other"]] {
             let search = gix_pathspec::Search::from_specs(pathspecs(specs), None, Path::new(""))?;
@@ -51,7 +52,7 @@ fn directory_matches_prefix() -> crate::Result {
 }
 
 #[test]
-fn directory_matches_prefix_starting_wildcards_always_match() -> crate::Result {
+fn directory_matches_prefix_starting_wildcards_always_match() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["*ir"]), None, Path::new(""))?;
     assert!(search.directory_matches_prefix("dir".into(), false));
     assert!(search.directory_matches_prefix("d".into(), false));
@@ -59,7 +60,7 @@ fn directory_matches_prefix_starting_wildcards_always_match() -> crate::Result {
 }
 
 #[test]
-fn empty_dir_always_matches() -> crate::Result {
+fn empty_dir_always_matches() -> TestResult {
     for specs in [
         &["*ir"] as &[_],
         &[],
@@ -84,7 +85,7 @@ fn empty_dir_always_matches() -> crate::Result {
 }
 
 #[test]
-fn directory_matches_prefix_leading() -> crate::Result {
+fn directory_matches_prefix_leading() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["d/d/generated/b"]), None, Path::new(""))?;
     assert!(!search.directory_matches_prefix("di".into(), false));
     assert!(!search.directory_matches_prefix("di".into(), true));
@@ -107,7 +108,7 @@ fn directory_matches_prefix_leading() -> crate::Result {
 }
 
 #[test]
-fn directory_matches_prefix_negative_wildcard() -> crate::Result {
+fn directory_matches_prefix_negative_wildcard() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&[":!*generated*"]), None, Path::new(""))?;
     assert!(
         search.directory_matches_prefix("di".into(), false),
@@ -130,7 +131,7 @@ fn directory_matches_prefix_negative_wildcard() -> crate::Result {
 }
 
 #[test]
-fn directory_matches_prefix_all_excluded() -> crate::Result {
+fn directory_matches_prefix_all_excluded() -> TestResult {
     for spec in ["!dir", "!dir/", "!d*", "!di*", "!dir/*", "!dir/*.o", "!*ir"] {
         for specs in [&[spec] as &[_], &[spec, "other"]] {
             let search = gix_pathspec::Search::from_specs(pathspecs(specs), None, Path::new(""))?;
@@ -144,7 +145,7 @@ fn directory_matches_prefix_all_excluded() -> crate::Result {
 }
 
 #[test]
-fn no_pathspecs_match_everything() -> crate::Result {
+fn no_pathspecs_match_everything() -> TestResult {
     let mut search = gix_pathspec::Search::from_specs([], None, Path::new(""))?;
     assert_eq!(search.patterns().count(), 0, "nothing artificial is added");
     let m = search
@@ -162,7 +163,7 @@ fn no_pathspecs_match_everything() -> crate::Result {
 }
 
 #[test]
-fn included_directory_and_excluded_subdir_top_level_with_prefix() -> crate::Result {
+fn included_directory_and_excluded_subdir_top_level_with_prefix() -> TestResult {
     let mut search = gix_pathspec::Search::from_specs(pathspecs(&[":/foo", ":!/foo/target/"]), None, Path::new("foo"))?;
     let m = search
         .pattern_matching_relative_path("foo".into(), Some(true), &mut no_attrs)
@@ -203,7 +204,7 @@ fn included_directory_and_excluded_subdir_top_level_with_prefix() -> crate::Resu
 }
 
 #[test]
-fn starts_with() -> crate::Result {
+fn starts_with() -> TestResult {
     let mut search = gix_pathspec::Search::from_specs(pathspecs(&["a/*"]), None, Path::new(""))?;
     assert!(
         search
@@ -243,7 +244,7 @@ fn starts_with() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_respects_must_be_dir() -> crate::Result {
+fn simplified_search_respects_must_be_dir() -> TestResult {
     let mut search = gix_pathspec::Search::from_specs(pathspecs(&["a/be/"]), None, Path::new(""))?;
     assert_eq!(
         search
@@ -312,7 +313,7 @@ fn simplified_search_respects_must_be_dir() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_respects_ignore_case() -> crate::Result {
+fn simplified_search_respects_ignore_case() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&[":(icase)foo/**/bar"]), None, Path::new(""))?;
     assert!(search.can_match_relative_path("Foo".into(), None));
     assert!(search.can_match_relative_path("foo".into(), Some(true)));
@@ -322,7 +323,7 @@ fn simplified_search_respects_ignore_case() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_respects_all_excluded() -> crate::Result {
+fn simplified_search_respects_all_excluded() -> TestResult {
     let search = gix_pathspec::Search::from_specs(
         pathspecs(&[":(exclude)a/file", ":(exclude)b/file"]),
         None,
@@ -343,7 +344,7 @@ fn simplified_search_respects_all_excluded() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_wildcards() -> crate::Result {
+fn simplified_search_wildcards() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["**/a*"]), None, Path::new(""))?;
     assert!(
         search.can_match_relative_path("a".into(), None),
@@ -359,7 +360,7 @@ fn simplified_search_wildcards() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_wildcards_simple() -> crate::Result {
+fn simplified_search_wildcards_simple() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["dir/*"]), None, Path::new(""))?;
     for is_dir in [None, Some(false), Some(true)] {
         assert!(
@@ -384,7 +385,7 @@ fn simplified_search_wildcards_simple() -> crate::Result {
 }
 
 #[test]
-fn simplified_search_handles_nil() -> crate::Result {
+fn simplified_search_handles_nil() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&[":"]), None, Path::new(""))?;
     assert!(search.can_match_relative_path("a".into(), None), "everything matches");
     assert!(search.can_match_relative_path("a".into(), Some(false)));
@@ -404,12 +405,12 @@ fn simplified_search_handles_nil() -> crate::Result {
 }
 
 #[test]
-fn longest_common_directory_no_prefix() -> crate::Result {
+fn longest_common_directory_no_prefix() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["tests/a/", "tests/b/", ":!*.sh"]), None, Path::new(""))?;
     assert_eq!(search.common_prefix(), "tests/");
-    assert_eq!(search.prefix_directory(), Path::new(""));
+    assert_eq!(search.prefix_directory()?, Path::new(""));
     assert_eq!(
-        search.longest_common_directory().expect("present").to_string_lossy(),
+        search.longest_common_directory()?.expect("present").to_string_lossy(),
         "tests/",
         "trailing slashes are not stripped"
     );
@@ -417,7 +418,7 @@ fn longest_common_directory_no_prefix() -> crate::Result {
 }
 
 #[test]
-fn longest_common_directory_with_prefix() -> crate::Result {
+fn longest_common_directory_with_prefix() -> TestResult {
     let search = gix_pathspec::Search::from_specs(
         pathspecs(&["tests/a/", "tests/b/", ":!*.sh"]),
         Some(Path::new("a/b")),
@@ -425,12 +426,12 @@ fn longest_common_directory_with_prefix() -> crate::Result {
     )?;
     assert_eq!(search.common_prefix(), "a/b/tests/");
     assert_eq!(
-        search.prefix_directory().to_string_lossy(),
+        search.prefix_directory()?.to_string_lossy(),
         "a/b",
         "trailing slashes are not contained"
     );
     assert_eq!(
-        search.longest_common_directory().expect("present").to_string_lossy(),
+        search.longest_common_directory()?.expect("present").to_string_lossy(),
         "a/b/tests/",
         "trailing slashes are present, they don't matter"
     );
@@ -438,7 +439,7 @@ fn longest_common_directory_with_prefix() -> crate::Result {
 }
 
 #[test]
-fn init_with_exclude() -> crate::Result {
+fn init_with_exclude() -> TestResult {
     let search = gix_pathspec::Search::from_specs(pathspecs(&["tests/", ":!*.sh"]), None, Path::new(""))?;
     assert_eq!(search.patterns().count(), 2, "nothing artificial is added");
     assert!(
@@ -447,12 +448,12 @@ fn init_with_exclude() -> crate::Result {
     );
     assert_eq!(search.common_prefix(), "tests");
     assert_eq!(
-        search.prefix_directory(),
+        search.prefix_directory()?,
         Path::new(""),
         "there was no prefix during initialization"
     );
     assert_eq!(
-        search.longest_common_directory(),
+        search.longest_common_directory()?,
         Some(Path::new("tests").into()),
         "but this works here, and it should be tested"
     );
@@ -469,7 +470,7 @@ fn init_with_exclude() -> crate::Result {
 }
 
 #[test]
-fn no_pathspecs_respect_prefix() -> crate::Result {
+fn no_pathspecs_respect_prefix() -> TestResult {
     let mut search = gix_pathspec::Search::from_specs([], Some(Path::new("a")), Path::new(""))?;
     assert_eq!(
         search.patterns().count(),
@@ -501,7 +502,7 @@ fn no_pathspecs_respect_prefix() -> crate::Result {
 }
 
 #[test]
-fn prefixes_are_always_case_sensitive() -> crate::Result {
+fn prefixes_are_always_case_sensitive() -> TestResult {
     let path = gix_testtools::scripted_fixture_read_only("match_baseline_files.sh")?.join("paths");
     let items = baseline::parse_paths(path)?;
 
@@ -547,7 +548,7 @@ fn prefixes_are_always_case_sensitive() -> crate::Result {
             Path::new(""),
         )?;
         assert_eq!(search.common_prefix(), common_prefix, "{spec} {prefix}");
-        assert_eq!(search.prefix_directory(), Path::new(expected_common_dir));
+        assert_eq!(search.prefix_directory()?, Path::new(expected_common_dir));
         let actual: Vec<_> = items
             .iter()
             .filter(|relative_path| {
@@ -578,7 +579,7 @@ fn prefixes_are_always_case_sensitive() -> crate::Result {
 }
 
 #[test]
-fn common_prefix() -> crate::Result {
+fn common_prefix() -> TestResult {
     for (specs, prefix, expected_common_prefix, expected_common_dir) in [
         (&["foo/bar", ":(icase)foo/bar"] as &[_], None, "", ""),
         (&["foo/bar", "foo"], None, "foo", ""),
@@ -596,7 +597,7 @@ fn common_prefix() -> crate::Result {
         )?;
         assert_eq!(search.common_prefix(), expected_common_prefix, "{specs:?} {prefix:?}");
         assert_eq!(
-            search.prefix_directory(),
+            search.prefix_directory()?,
             Path::new(expected_common_dir),
             "{specs:?} {prefix:?}"
         );
@@ -605,8 +606,8 @@ fn common_prefix() -> crate::Result {
 }
 
 #[test]
-fn files() -> crate::Result {
-    baseline::run("file", false, baseline::files)
+fn files() -> TestResult {
+    baseline::run("file", false, baseline::files).map_err(Into::into)
 }
 
 fn pathspecs(input: &[&str]) -> Vec<gix_pathspec::Pattern> {
@@ -617,6 +618,7 @@ fn pathspecs(input: &[&str]) -> Vec<gix_pathspec::Pattern> {
 }
 
 mod baseline {
+    use crate::Result;
     use std::path::{Path, PathBuf};
 
     use bstr::{BString, ByteSlice};
@@ -624,8 +626,8 @@ mod baseline {
     pub fn run(
         name: &str,
         items_are_dirs: bool,
-        init: impl FnOnce() -> crate::Result<(PathBuf, Vec<String>, Vec<Expected>)>,
-    ) -> crate::Result {
+        init: impl FnOnce() -> Result<(PathBuf, Vec<String>, Vec<Expected>)>,
+    ) -> Result {
         let (root, items, expected) = init()?;
         let mut collection = Default::default();
         let attrs =
@@ -733,7 +735,7 @@ mod baseline {
         }
     }
 
-    pub fn directories() -> crate::Result<(PathBuf, Vec<String>, Vec<Expected>)> {
+    pub fn directories() -> Result<(PathBuf, Vec<String>, Vec<Expected>)> {
         let root = gix_testtools::scripted_fixture_read_only("match_baseline_dirs.sh")?.join("parent");
         let buf = std::fs::read(root.join("paths"))?;
         let items = submodule::matches_from_status(&buf)
@@ -743,7 +745,7 @@ mod baseline {
         Ok((root, items, expected))
     }
 
-    pub fn files() -> crate::Result<(PathBuf, Vec<String>, Vec<Expected>)> {
+    pub fn files() -> Result<(PathBuf, Vec<String>, Vec<Expected>)> {
         let root = gix_testtools::scripted_fixture_read_only("match_baseline_files.sh")?;
         let items = parse_paths(root.join("paths"))?;
         let expected = files::parse_expected(&std::fs::read(root.join("baseline.git"))?);

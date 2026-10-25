@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use gix_testtools::fixture_path_standalone;
+use gix_testtools::fixture_path;
 
 use crate::{file::store_with_packed_refs, packed::write_packed_refs_with};
 
@@ -13,7 +13,7 @@ fn sorted_buffer_works() {
 }
 
 #[test]
-fn empty_buffers_should_not_exist_but_are_fine_to_open() -> crate::Result {
+fn empty_buffers_should_not_exist_but_are_fine_to_open() -> gix_testtools::TestResult {
     let (_keep, path) = write_packed_refs_with(&[])?;
     assert_eq!(gix_ref::packed::Buffer::open(path, 512, HASH_KIND)?.iter()?.count(), 0);
     Ok(())
@@ -23,12 +23,12 @@ fn empty_buffers_should_not_exist_but_are_fine_to_open() -> crate::Result {
 fn unsorted_buffers_or_those_without_a_header_can_be_opened_and_searched() {
     for (fixture, cutoff) in [("without-header", 20u64), ("unsorted", 32 * 1024)] {
         let buffer = gix_ref::packed::Buffer::open(
-            fixture_path_standalone(Path::new("packed-refs").join(fixture).to_str().expect("utf8")),
+            fixture_path(Path::new("packed-refs").join(fixture).to_str().expect("utf8")),
             cutoff,
             HASH_KIND,
         )
         .unwrap();
-        for packed_ref in buffer.iter().unwrap().map(Result::unwrap) {
+        for packed_ref in buffer.iter().unwrap().map(std::result::Result::unwrap) {
             let found_ref = buffer
                 .find(packed_ref.name)
                 .expect("ref can be found as buffer is sorted");
@@ -41,16 +41,21 @@ fn unsorted_buffers_or_those_without_a_header_can_be_opened_and_searched() {
 }
 
 #[test]
-fn bogus_content_triggers_an_error() -> crate::Result {
+fn bogus_content_triggers_an_error() -> gix_testtools::TestResult {
     let packed_refs_data = b"starts with a bogus record, not a header anyway";
     let (_keep, path) = write_packed_refs_with(packed_refs_data)?;
 
-    match gix_ref::packed::Buffer::open(path, 32, HASH_KIND) {
-        Ok(_) => unreachable!("unsorted buffers can't be opened"),
-        Err(err) => assert_eq!(
-            err.to_string(),
-            "The packed-refs file did not have a header or wasn't sorted and could not be iterated"
-        ),
-    }
+    let err = gix_ref::packed::Buffer::open(path, 32, HASH_KIND).expect_err("malformed packed refs");
+    insta::assert_debug_snapshot!(err, "bogus content triggers an error", @r#"
+    Invalid packed reference, input="starts with a bogus record, not a header anyway", line=1
+
+    Caused by:
+        0: Malformed packed reference
+    "#);
+    assert!(err.is_corrupted());
+    assert_eq!(
+        err.metadata().next().expect("failed record")["input"],
+        gix_error::MetadataValue::from(packed_refs_data.as_slice())
+    );
     Ok(())
 }

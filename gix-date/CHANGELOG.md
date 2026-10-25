@@ -5,14 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.15.3 (2026-04-28)
+## 0.18.1 (2026-10-22)
 
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release over the course of 2 calendar days.
- - 3 days passed between releases.
+ - 3 commits contributed to the release over the course of 14 calendar days.
+ - 14 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -23,6 +23,328 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Merge pull request #3053 from GitoxideLabs/various-improvements ([`2d8dcc4`](https://github.com/GitoxideLabs/gitoxide/commit/2d8dcc466750e474e6c51ac636c24259563a26cf))
+    - Release gix-error v0.5.1, gix-utils v0.5.1 ([`6d1b686`](https://github.com/GitoxideLabs/gitoxide/commit/6d1b68632cec55fa5d3f752ca97daca4e5485b6c))
+    - Merge pull request #3048 from GitoxideLabs/new-release ([`5fccccf`](https://github.com/GitoxideLabs/gitoxide/commit/5fccccfdedd17f7d4b0cc57039d118a3496aa8aa))
+</details>
+
+## 0.18.0 (2026-10-08)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 6 commits contributed to the release over the course of 13 calendar days.
+ - 13 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.5.0, gix-date v0.18.0, gix-actor v0.44.0, gix-trace v0.3.0, gix-validate v0.13.0, gix-path v0.14.0, gix-utils v0.5.0, gix-quote v0.10.0, gix-command v0.12.0, gix-hash v0.28.0, gix-hashtable v0.18.0, gix-parallel v0.50.0, gix-fs v0.24.0, gix-tempfile v26.0.0, gix-object v0.66.0, gix-glob v0.29.0, gix-attributes v0.37.0, gix-packetline v0.24.0, gix-filter v0.36.0, gix-chunk v0.10.0, gix-commitgraph v0.41.0, gix-revwalk v0.37.0, gix-traverse v0.63.0, gix-worktree-stream v0.38.0, gix-archive v0.38.0, gix-bitmap v0.6.0, gix-lock v26.0.0, gix-index v0.57.0, gix-config-value v0.21.0, gix-pathspec v0.22.0, gix-ignore v0.24.0, gix-worktree v0.58.0, gix-imara-diff v0.3.1, gix-diff v0.69.0, gix-blame v0.19.0, gix-ref v0.69.0, gix-sec v0.16.0, gix-config v0.62.0, gix-prompt v0.19.0, gix-url v0.40.0, gix-credentials v0.42.0, gix-discover v0.57.0, gix-dir v0.31.0, gix-mailmap v0.36.0, gix-revision v0.51.0, gix-merge v0.22.0, gix-negotiate v0.37.0, gix-note v0.3.0, gix-zlib v0.3.0, gix-pack v0.76.0, gix-odb v0.86.0, gix-refspec v0.47.0, gix-shallow v0.15.0, gix-transport v0.61.0, gix-protocol v0.67.0, gix-status v0.36.0, gix-submodule v0.36.0, gix-worktree-state v0.36.0, gix v0.89.0, gix-fsck v0.27.0, gitoxide-core v0.63.0, gix-tix v0.5.0, gitoxide v0.60.0, safety bump 62 crates ([`0115e90`](https://github.com/GitoxideLabs/gitoxide/commit/0115e902fd0334b8f370766993eb17babed3157f))
+    - Prepare changelogs prior to release ([`794eeef`](https://github.com/GitoxideLabs/gitoxide/commit/794eeef835f8dde0fc8f4fd1d215f304d28d7f77))
+    - Merge pull request #3032 from GitoxideLabs/sec-audit ([`1d7bac7`](https://github.com/GitoxideLabs/gitoxide/commit/1d7bac742f70b72ddda0c7294f4a97566b8db596))
+    - Merge pull request #3033 from GitoxideLabs/gix-cli-progress-cleanup ([`80f4b03`](https://github.com/GitoxideLabs/gitoxide/commit/80f4b03257da9a664468e7b75247023187565a34))
+    - Merge pull request #3022 from GitoxideLabs/release-testtools ([`f819565`](https://github.com/GitoxideLabs/gitoxide/commit/f819565c2c4c56619c4888acef6cf3b8144cbccb))
+    - Merge pull request #3020 from GitoxideLabs/report-september ([`5fb3dcf`](https://github.com/GitoxideLabs/gitoxide/commit/5fb3dcf6a86ac0c403776c8820bf5d23f187f7e1))
+</details>
+
+## 0.17.0 (2026-09-25)
+
+### Bug Fixes
+
+ - <csr-id-7c90c2b344b28c373f3624cd4d3462cbf13bd331/> reject ambiguous bare numeric dates
+   <!-- agent -->
+   `parse("20080214", None)` silently returned epoch seconds in 1970 because
+   any signed integer was accepted before the flexible date parser. Apply
+   Git's `100000000` floor to bare timestamps so compact-date lookalikes,
+   zero, and negative numbers do not silently become epoch seconds. Explicit
+   `@` timestamps and raw commit-header dates retain their existing behavior.
+   Update the documented examples and their existing acceptance tests.
+   
+   Extend the existing Git baseline with six rejected bare numbers and three
+   explicit raw timestamps. Generate fixed-date samples through
+   `GIT_AUTHOR_DATE` and `git var GIT_AUTHOR_IDENT`: the previous expiry-date
+   parser could fall back to approximate dates and conceal these errors.
+   The regenerated archive preserves all 128 existing baseline samples.
+   The regression failed on `20080214` before the parser change.
+   
+   Git reference: `date.c::match_digit()` reserves numbers below `100000000`
+   for date components; `t/t0006-date.sh` covers the threshold and explicit
+   `@0 +0000`. Baselines were generated with Git 2.50.1 (Apple Git-155).
+ - <csr-id-2f63256086dbbd863baf3a536b9421dfccf3a7d1/> reject a timezone offset git would not read
+   `parse()` took its offset from `jiff`, which reads up to `±25:59:59`. Git's
+   `match_tz()` in `date.c` reads the four digits as a clock time, so hours must
+   be under 24 and minutes under 60, and `+2400` is not a timezone to it at all —
+   it falls back to the local one. Recorded from git 2.50.1:
+   
+   | input | git | `parse()` before |
+   | --- | --- | --- |
+   | `2022-01-01 12:00:00 +2359` | `+2359` | `+2359` |
+   | `2022-01-01 12:00:00 +2400` | local offset | `+2400` |
+   | `2022-01-01 12:00:00 +2559` | local offset | `+2559` |
+   
+   The accepted value could not be written back and read again, either:
+   `parse("2022-01-01 12:00:00 +2400")` serializes to `1640952000 +2400`, which
+   `parse()` then rejects, since `parse_raw()` allows no offset past `±14:00`.
+   
+   `parse_header()` is untouched, so commits carrying a wild offset — like
+   `1516956202 -3407` in edk2, the reproduction in #2091 — still read as before.
+
+### Changed (BREAKING)
+
+ - <csr-id-4b42e0ce80ae934cae4f102f44c392581758608f/> raise MSRV to Rust 1.88
+   <!-- agent -->
+   The newly published `dua-core` 3.3 release used by linked-worktree removal
+   requires Rust 1.88, so raise every workspace crate and the advertised badge
+   together.
+   
+   Keep the MSRV checks buildable by selecting the latest `sysinfo` and `rusqlite`
+   release lines that support Rust 1.88.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 13 commits contributed to the release over the course of 33 calendar days.
+ - 34 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#3001](https://github.com/GitoxideLabs/gitoxide/issues/3001)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#3001](https://github.com/GitoxideLabs/gitoxide/issues/3001)**
+    - Reject ambiguous bare numeric dates ([`7c90c2b`](https://github.com/GitoxideLabs/gitoxide/commit/7c90c2b344b28c373f3624cd4d3462cbf13bd331))
+ * **Uncategorized**
+    - Release gix-error v0.4.0, gix-date v0.17.0, gix-actor v0.43.0, gix-trace v0.2.0, gix-validate v0.12.0, gix-path v0.13.0, gix-utils v0.4.0, gix-quote v0.9.0, gix-command v0.11.0, gix-features v0.50.0, gix-hash v0.27.0, gix-hashtable v0.17.0, gix-fs v0.23.0, gix-tempfile v25.0.0, gix-object v0.65.0, gix-glob v0.28.0, gix-attributes v0.36.0, gix-packetline v0.23.0, gix-filter v0.35.0, gix-chunk v0.9.0, gix-commitgraph v0.40.0, gix-revwalk v0.36.0, gix-traverse v0.62.0, gix-worktree-stream v0.37.0, gix-archive v0.37.0, gix-bitmap v0.5.0, gix-lock v25.0.0, gix-index v0.56.0, gix-config-value v0.20.0, gix-pathspec v0.21.0, gix-ignore v0.23.0, gix-worktree v0.57.0, gix-imara-diff v0.3.0, gix-diff v0.68.0, gix-blame v0.18.0, gix-ref v0.68.0, gix-sec v0.15.0, gix-config v0.61.0, gix-prompt v0.18.0, gix-url v0.39.0, gix-credentials v0.41.0, gix-discover v0.56.0, gix-dir v0.30.0, gix-mailmap v0.35.0, gix-revision v0.50.0, gix-merge v0.21.0, gix-negotiate v0.36.0, gix-note v0.2.0, gix-zlib v0.2.0, gix-pack v0.75.0, gix-odb v0.85.0, gix-macros v0.2.0, gix-refspec v0.46.0, gix-shallow v0.14.0, gix-transport v0.60.0, gix-protocol v0.66.0, gix-status v0.35.0, gix-submodule v0.35.0, gix-worktree-state v0.35.0, gix v0.88.0, gix-fsck v0.26.0, gitoxide-core v0.62.0, gix-tix v0.4.0, gitoxide v0.59.0, safety bump 60 crates ([`37860b3`](https://github.com/GitoxideLabs/gitoxide/commit/37860b34db26096c8187ef55bdf4b76705142733))
+    - Merge pull request #2847 from GitoxideLabs/gix-error-completion ([`6356013`](https://github.com/GitoxideLabs/gitoxide/commit/6356013bca0987c6c97ad7ba9d5347271979b51e))
+    - Merge pull request #3002 from GitoxideLabs/fix-8bit-date ([`2abc090`](https://github.com/GitoxideLabs/gitoxide/commit/2abc090968e53580bec21555ed39829abbc13ef5))
+    - Merge pull request #2994 from rawsun007/fix-date-offset-range ([`37149b8`](https://github.com/GitoxideLabs/gitoxide/commit/37149b894efac97b4a5aa96f9c5ed6089429c49f))
+    - Review ([`ba936dc`](https://github.com/GitoxideLabs/gitoxide/commit/ba936dc8d1f33b8bc6bd2ee24ae06ee1fc5e0428))
+    - Reject a timezone offset git would not read ([`2f63256`](https://github.com/GitoxideLabs/gitoxide/commit/2f63256086dbbd863baf3a536b9421dfccf3a7d1))
+    - Merge pull request #2985 from youdie006/fix-short-time-offset-split ([`4ec7c08`](https://github.com/GitoxideLabs/gitoxide/commit/4ec7c08e4771d3e0ac6ed22e1639bc33ed9d48be))
+    - Review ([`a118bb4`](https://github.com/GitoxideLabs/gitoxide/commit/a118bb41ff713ff3571790c518780199fea3ba65))
+    - Accept a timezone offset after a short compact ISO8601 time ([`81d23b5`](https://github.com/GitoxideLabs/gitoxide/commit/81d23b53485b621d12f806bda60cafd6731b6ba2))
+    - Merge pull request #2949 from GitoxideLabs/error-conversion-review ([`a095334`](https://github.com/GitoxideLabs/gitoxide/commit/a0953348e4d27f59222c1782119d2539a778cd4d))
+    - Raise MSRV to Rust 1.88 ([`4b42e0c`](https://github.com/GitoxideLabs/gitoxide/commit/4b42e0ce80ae934cae4f102f44c392581758608f))
+    - Merge pull request #2933 from GitoxideLabs/report-august ([`b8914ff`](https://github.com/GitoxideLabs/gitoxide/commit/b8914ffda5bc8f6ea851aaf1f720140acfe96dbb))
+</details>
+
+## 0.16.0 (2026-08-22)
+
+### Bug Fixes
+
+ - <csr-id-08de71ada0121b8a7ca0ba6cfe1a156959ea021b/> relative dates roll over month ends like Git, instead of clamping.
+   `N months/years ago` now steps down the calendar fields while keeping the
+   day-of-month, so a day beyond the end of the target month rolls over into
+   the following month, the way `mktime(3)` normalizes it for Git: one month
+   before 2026-03-31 now is 2026-03-03, no longer 2026-02-28.
+   
+   Count-unit pairs also apply in input order and accumulate when repeated,
+   both matching Git as well.
+ - <csr-id-1ebbd8cb34e8083b19e7186d07c6316ad4f9e280/> accept the relative dates Git accepts, and read their units case-insensitively.
+   Five shapes `approxidate()` in Git's `date.c` accepts were not accepted here.
+   
+   Units are now matched without regard to case, as `match_string()` does. This one
+   produced a wrong answer rather than a rejection: `2 HOURS ago` fell through to
+   the catch-all and became two *seconds* ago, which looks like a date rather than
+   an error.
+   
+   More than one `<count> <unit>` pair is read, so `2 days 3 hours ago` is both of
+   them. Git applies a unit the moment it sees one and carries on, and stopping
+   after the first pair would substitute a plausible-looking two days.
+   
+   Any byte that is neither a digit nor a letter separates the parts, because
+   `approxidate_alpha()` ends a word at the first byte that is not a letter. So
+   `1.hour.ago` and `1-hour-ago` read as `1 hour ago` does, and a leading `-` is a
+   separator too, which is why `-1 days ago` is one day rather than a rejection.
+   Note this holds for the `<count> <unit>` shapes handled here; `approxidate_digit()`
+   does look at the byte after a digit run, which is how `2008.12.24` stays a date.
+   
+   Counts may be spelled out, from `one` to `ten`, as they are in `number_name[]`.
+   `zero` is not among them, since Git's lookup starts at one. `last` is a count of
+   one, so `last week` resolves.
+   
+   The trailing `ago` is not required, because Git applies a unit as soon as it sees
+   one; even `2 days hence` resolves into the past there. It is still what permits an
+   unknown unit to count as seconds, though, or `1745582210 +0200` would parse as a
+   count in the unknown unit `0200` and never reach `parse_raw()`.
+   
+   Seven entries are added to the baseline, so these record Git's own answers. The
+   comment claiming Git reads an unknown unit as seconds is corrected: it does not,
+   and leaves the count pending, where it stands in for a field of the date itself.
+   
+   Not addressed: `noon`, `midnight`, `tea`, `AM` and `PM` are in Git's `special[]`
+   table and still rejected here. They resolve against the local time zone, and this
+   parser deliberately works in UTC.
+ - <csr-id-414dfeb0e94ed51f103b2ae65d3a70bf1ae5aab7/> accept the '@' prefix on epoch dates, like Git does
+   `parse()` is documented as parsing any time that Git can parse, and `@` is the
+   one prefix Git checks before anything else in `parse_date_basic()`. Two paths
+   reach a timestamp there: `@<seconds> ±HHMM` is taken by that fast path for any
+   value, while a bare `@<seconds>` is skipped as an unmatched byte and recognised
+   only by the epoch heuristic that starts at 100000000.
+   
+   Both forms were rejected here even though the underlying `1660874655 +0800` and
+   `1234567890` formats already parse, so the prefix is stripped and those parsers
+   reused.
+   
+   Also corrects the relative-date documentation, which advertised `1 hour from
+   now` although only `now`, `today`, `yesterday` and `<n> <unit> ago` are
+   understood.
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-0e7f722b5aa980565bb235d9ba5d188d8cb868a0/> represent now in `parse(... ,now)` as timezone-aware instant.
+   This allows time computation to be timezone aware, just like in Git.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 12 commits contributed to the release over the course of 38 calendar days.
+ - 38 days passed between releases.
+ - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#2909](https://github.com/GitoxideLabs/gitoxide/issues/2909)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#2909](https://github.com/GitoxideLabs/gitoxide/issues/2909)**
+    - Relative dates roll over month ends like Git, instead of clamping. ([`08de71a`](https://github.com/GitoxideLabs/gitoxide/commit/08de71ada0121b8a7ca0ba6cfe1a156959ea021b))
+ * **Uncategorized**
+    - Update manifests prior to release ([`ebe9095`](https://github.com/GitoxideLabs/gitoxide/commit/ebe9095f2888d3c12447ea5eed9d0afdb0fd5aeb))
+    - Merge pull request #2905 from GitoxideLabs/various-improvements ([`f3bbfad`](https://github.com/GitoxideLabs/gitoxide/commit/f3bbfadd4b4f1d72c85c62eb3d7ae337c922f945))
+    - Adapt to changes in `gix-testtools` ([`0cbe539`](https://github.com/GitoxideLabs/gitoxide/commit/0cbe53971687fb3b1959925aa9d8dc89deb5b474))
+    - Merge pull request #2910 from codeAnqiang-ma/fix/relative-date-month-rollover ([`566fea1`](https://github.com/GitoxideLabs/gitoxide/commit/566fea12b59005673dd4beede48df12d8884264e))
+    - Represent now in `parse(... ,now)` as timezone-aware instant. ([`0e7f722`](https://github.com/GitoxideLabs/gitoxide/commit/0e7f722b5aa980565bb235d9ba5d188d8cb868a0))
+    - Review ([`1a7e5ed`](https://github.com/GitoxideLabs/gitoxide/commit/1a7e5ed571ae83e4251bfc6e4b1e09d6d9fa2b77))
+    - Merge pull request #2889 from ameyypawar/date-at-epoch ([`bde37c1`](https://github.com/GitoxideLabs/gitoxide/commit/bde37c1a11afd1071343ae0ab683b382212c22e1))
+    - Review ([`a094c4e`](https://github.com/GitoxideLabs/gitoxide/commit/a094c4e2684f2cae8ae18e2cec13179b2895f7b0))
+    - Accept the relative dates Git accepts, and read their units case-insensitively. ([`1ebbd8c`](https://github.com/GitoxideLabs/gitoxide/commit/1ebbd8cb34e8083b19e7186d07c6316ad4f9e280))
+    - Accept the '@' prefix on epoch dates, like Git does ([`414dfeb`](https://github.com/GitoxideLabs/gitoxide/commit/414dfeb0e94ed51f103b2ae65d3a70bf1ae5aab7))
+    - Merge pull request #2714 from GitoxideLabs/fix-credentials-parsing ([`cf3053a`](https://github.com/GitoxideLabs/gitoxide/commit/cf3053a3c18e2de788cdaa9f41b5bd343bdc0091))
+</details>
+
+## 0.15.6 (2026-07-15)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release.
+ - 23 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Thanks Clippy
+
+<csr-read-only-do-not-edit/>
+
+[Clippy](https://github.com/rust-lang/rust-clippy) helped 1 time to make code idiomatic. 
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-path v0.12.2, gix-error v0.2.5, gix-utils v0.3.4, gix-date v0.15.6, gix-url v0.36.2, gix-credentials v0.38.2 ([`27aec47`](https://github.com/GitoxideLabs/gitoxide/commit/27aec474c113cc885d44631b329454dc1ad0fed2))
+    - Merge pull request #2702 from ameyypawar/fix/2694-exn-source-chain ([`e9c973d`](https://github.com/GitoxideLabs/gitoxide/commit/e9c973d9476bef293bec89cd683cb60b02a85e52))
+    - Thanks clippy ([`d533f0c`](https://github.com/GitoxideLabs/gitoxide/commit/d533f0c7a6a6b20cbcfe5a755d472b921e38b4a1))
+    - Merge pull request #2646 from GitoxideLabs/report ([`1b1541e`](https://github.com/GitoxideLabs/gitoxide/commit/1b1541ed7a457afd48385c1ee39113949a9f5263))
+</details>
+
+## 0.15.5 (2026-06-22)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release over the course of 27 calendar days.
+ - 27 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-date v0.15.5, gix-hashtable v0.15.2, gix-object v0.62.0, gix-attributes v0.33.2, gix-filter v0.32.0, gix-revwalk v0.33.0, gix-traverse v0.59.0, gix-worktree-stream v0.34.0, gix-archive v0.34.0, gix-tempfile v23.0.2, gix-index v0.53.0, gix-worktree v0.54.0, gix-imara-diff v0.2.3, gix-diff v0.65.0, gix-blame v0.15.0, gix-ref v0.65.0, gix-config v0.58.0, gix-discover v0.53.0, gix-dir v0.27.0, gix-revision v0.47.0, gix-merge v0.18.0, gix-negotiate v0.33.0, gix-pack v0.72.0, gix-odb v0.82.0, gix-refspec v0.43.0, gix-transport v0.57.2, gix-protocol v0.63.0, gix-status v0.32.0, gix-submodule v0.32.0, gix-worktree-state v0.32.0, gix v0.85.0, gix-fsck v0.23.0, gitoxide-core v0.59.0, gitoxide v0.55.0, safety bump 28 crates ([`6428edc`](https://github.com/GitoxideLabs/gitoxide/commit/6428edc82fc8a16d5ef34ca2d49aa6fdff3645fe))
+    - Merge pull request #2635 from GitoxideLabs/dependabot/cargo/cargo-7b971a5e8c ([`155ff6d`](https://github.com/GitoxideLabs/gitoxide/commit/155ff6d345ba49ff72cb25c08a8b9dfae8c41bc7))
+    - Bump the cargo group with 40 updates ([`9402adc`](https://github.com/GitoxideLabs/gitoxide/commit/9402adc4c854f72906392a157b848a0ff36900a2))
+    - Merge pull request #2618 from GitoxideLabs/report ([`f7d4f33`](https://github.com/GitoxideLabs/gitoxide/commit/f7d4f33b58503996ae90497b69ce4c3a757982ac))
+</details>
+
+## 0.15.4 (2026-05-26)
+
+### Refactor
+
+ - <csr-id-0234460259abb2efb74801ebf8ffa90a6963c304/> reduce smallvec dep from git-date
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 11 commits contributed to the release over the course of 28 calendar days.
+ - 28 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.2.4, gix-date v0.15.4, gix-actor v0.41.1, gix-trace v0.1.20, gix-validate v0.11.2, gix-path v0.12.1, gix-utils v0.3.3, gix-features v0.48.1, gix-hash v0.25.1, gix-hashtable v0.15.1, gix-object v0.61.0, gix-glob v0.26.1, gix-quote v0.7.2, gix-attributes v0.33.1, gix-command v0.9.1, gix-packetline v0.21.4, gix-filter v0.31.0, gix-fs v0.21.2, gix-chunk v0.7.2, gix-commitgraph v0.37.1, gix-revwalk v0.32.0, gix-traverse v0.58.0, gix-worktree-stream v0.33.0, gix-archive v0.33.0, gix-bitmap v0.3.2, gix-tempfile v23.0.1, gix-lock v23.0.1, gix-index v0.52.0, gix-config-value v0.18.1, gix-pathspec v0.18.1, gix-ignore v0.21.1, gix-worktree v0.53.0, gix-imara-diff v0.2.2, gix-diff v0.64.0, gix-blame v0.14.0, gix-ref v0.64.0, gix-sec v0.14.1, gix-config v0.57.0, gix-prompt v0.15.1, gix-url v0.36.1, gix-credentials v0.38.1, gix-discover v0.52.0, gix-dir v0.26.0, gix-mailmap v0.33.1, gix-revision v0.46.0, gix-merge v0.17.0, gix-negotiate v0.32.0, gix-pack v0.71.0, gix-odb v0.81.0, gix-refspec v0.42.0, gix-shallow v0.12.1, gix-transport v0.57.1, gix-protocol v0.62.0, gix-status v0.31.0, gix-submodule v0.31.0, gix-worktree-state v0.31.0, gix v0.84.0, gix-fsck v0.22.0, gitoxide-core v0.58.0, gitoxide v0.54.0, safety bump 27 crates ([`10c58bb`](https://github.com/GitoxideLabs/gitoxide/commit/10c58bb56597d9335611da121aac21f9b09b6e5b))
+    - Merge pull request #2593 from tisonkun/reduce-dep ([`344ef84`](https://github.com/GitoxideLabs/gitoxide/commit/344ef84e7d36d66848fbfe687c843fc6456e8392))
+    - Refactor gix-time tests to match standard ([`34095ad`](https://github.com/GitoxideLabs/gitoxide/commit/34095adb0c4a99d621b3b03cf12c20c0e6121432))
+    - Review ([`df23312`](https://github.com/GitoxideLabs/gitoxide/commit/df23312056d78f456f05c5cf17baa4456a43e608))
+    - Reduce smallvec dep from git-date ([`0234460`](https://github.com/GitoxideLabs/gitoxide/commit/0234460259abb2efb74801ebf8ffa90a6963c304))
+    - Merge pull request #2568 from GitoxideLabs/dependabot/cargo/cargo-56d6b174d8 ([`ab2fee1`](https://github.com/GitoxideLabs/gitoxide/commit/ab2fee14651202fcb7b3d8178932090c73492014))
+    - Update crates to Rust 2024 edition ([`2cb17b2`](https://github.com/GitoxideLabs/gitoxide/commit/2cb17b2e7f6009693a55af907614f705a29d8c29))
+    - Remove rust_2018_idioms lint declarations ([`e10d5f6`](https://github.com/GitoxideLabs/gitoxide/commit/e10d5f662df2ee05f973a3167ad215a330ee74e1))
+    - Raise MSRV for hash dependency updates ([`3675a8d`](https://github.com/GitoxideLabs/gitoxide/commit/3675a8d61b17845a783bc27912a3f52ac273a4af))
+    - Bump the cargo group across 1 directory with 10 updates ([`4c77f81`](https://github.com/GitoxideLabs/gitoxide/commit/4c77f81e19b86979495abcf46401a4f226163177))
+    - Merge pull request #2546 from GitoxideLabs/fix-2545 ([`adb8328`](https://github.com/GitoxideLabs/gitoxide/commit/adb8328952478c443ead5f5a8c6851928b377b37))
+</details>
+
+## 0.15.3 (2026-04-28)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release over the course of 2 calendar days.
+ - 4 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.2.3, gix-date v0.15.3, gix-actor v0.41.0, gix-path v0.12.0, gix-features v0.48.0, gix-hash v0.25.0, gix-hashtable v0.15.0, gix-object v0.60.0, gix-glob v0.26.0, gix-attributes v0.33.0, gix-command v0.9.0, gix-filter v0.30.0, gix-fs v0.21.0, gix-commitgraph v0.37.0, gix-revwalk v0.31.0, gix-traverse v0.57.0, gix-worktree-stream v0.32.0, gix-archive v0.32.0, gix-tempfile v23.0.0, gix-lock v23.0.0, gix-index v0.51.0, gix-config-value v0.18.0, gix-pathspec v0.18.0, gix-ignore v0.21.0, gix-worktree v0.52.0, gix-imara-diff v0.2.1, gix-diff v0.63.0, gix-blame v0.13.0, gix-ref v0.63.0, gix-sec v0.14.0, gix-config v0.56.0, gix-prompt v0.15.0, gix-url v0.36.0, gix-credentials v0.38.0, gix-discover v0.51.0, gix-dir v0.25.0, gix-mailmap v0.33.0, gix-revision v0.45.0, gix-merge v0.16.0, gix-negotiate v0.31.0, gix-pack v0.70.0, gix-odb v0.80.0, gix-refspec v0.41.0, gix-shallow v0.12.0, gix-transport v0.57.0, gix-protocol v0.61.0, gix-status v0.30.0, gix-submodule v0.30.0, gix-worktree-state v0.30.0, gix v0.83.0, gix-fsck v0.21.0, gitoxide-core v0.57.0, gitoxide v0.53.0, safety bump 48 crates ([`53f880c`](https://github.com/GitoxideLabs/gitoxide/commit/53f880c7604232c367870088176e42efd8a5b783))
     - Merge pull request #2540 from GitoxideLabs/reporting ([`4d5ba23`](https://github.com/GitoxideLabs/gitoxide/commit/4d5ba231685e8ff36195603c57193aa1cd21fa8e))
     - Merge pull request #2529 from GitoxideLabs/reflog-newline-handling ([`2c3a08e`](https://github.com/GitoxideLabs/gitoxide/commit/2c3a08e7d255df7d939af3d59c42aa0d6a21b76a))
     - Adapt to changes in `gix-error` ([`2e2a126`](https://github.com/GitoxideLabs/gitoxide/commit/2e2a1264b53cda92c00176639225d1b293099350))
@@ -68,6 +390,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release.
+ - 28 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -176,7 +499,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release over the course of 5 calendar days.
- - 5 days passed between releases.
+ - 6 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -237,7 +560,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release.
- - 29 days passed between releases.
+ - 30 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -276,6 +599,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 8 commits contributed to the release.
+ - 30 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -299,13 +623,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.10.7 (2025-10-23)
 
 <csr-id-6f469a6fea59c88e6c69a5f94b0bc8a5977cb75b/>
-
-### Other
-
- - <csr-id-6f469a6fea59c88e6c69a5f94b0bc8a5977cb75b/> Remove `doc_auto_cfg` feature to fix docs.rs documentation.
-   It is part of `doc_cfg` feature since https://github.com/rust-lang/rust/pull/138907
-   
-   This fixes the docs.rs build
 
 ### Commit Statistics
 
@@ -381,7 +698,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release over the course of 7 calendar days.
- - 7 days passed between releases.
+ - 8 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -436,7 +753,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 7 commits contributed to the release over the course of 65 calendar days.
- - 65 days passed between releases.
+ - 66 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -493,6 +810,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -533,6 +851,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 15 commits contributed to the release.
+ - 21 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -570,15 +889,12 @@ A maintenance release without user-facing changes.
 
 <csr-id-3ae99a42f51cd2d6c55c6abbd1ead86bf8bf2e1f/>
 
-### Other
-
- - <csr-id-3ae99a42f51cd2d6c55c6abbd1ead86bf8bf2e1f/> upgrade to jiff 0.2
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 10 commits contributed to the release.
+ - 103 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -858,6 +1174,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 9 commits contributed to the release.
+ - 33 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -891,41 +1208,6 @@ A maintenance release without user-facing changes.
 
  - <csr-id-cdac4a9b04959b0fc71009b5c828cdcb10a38828/> remove workspace lints from Cargo manifests of fuzz-projects.
    They are not part of the parent workspace.
-
-### Other
-
- - <csr-id-64ff0a77062d35add1a2dd422bb61075647d1a36/> Update gitoxide repository URLs
-   This updates `Byron/gitoxide` URLs to `GitoxideLabs/gitoxide` in:
-   
-   - Markdown documentation, except changelogs and other such files
-     where such changes should not be made.
-   
-   - Documentation comments (in .rs files).
-   
-   - Manifest (.toml) files, for the value of the `repository` key.
-   
-   - The comments appearing at the top of a sample hook that contains
-     a repository URL as an example.
-   
-   When making these changes, I also allowed my editor to remove
-   trailing whitespace in any lines in files already being edited
-   (since, in this case, there was no disadvantage to allowing this).
-   
-   The gitoxide repository URL changed when the repository was moved
-   into the recently created GitHub organization `GitoxideLabs`, as
-   detailed in #1406. Please note that, although I believe updating
-   the URLs to their new canonical values is useful, this is not
-   needed to fix any broken links, since `Byron/gitoxide` URLs
-   redirect (and hopefully will always redirect) to the coresponding
-   `GitoxideLabs/gitoxide` URLs.
-   
-   While this change should not break any URLs, some affected URLs
-   were already broken. This updates them, but they are still broken.
-   They will be fixed in a subsequent commit.
-   
-   This also does not update `Byron/gitoxide` URLs in test fixtures
-   or test cases, nor in the `Makefile`. (It may make sense to change
-   some of those too, but it is not really a documentation change.)
 
 ### Commit Statistics
 
@@ -970,32 +1252,6 @@ This is a *breaking release* as the `time` is gone and it's API isn't available 
 ### Bug Fixes
 
  - <csr-id-a729c4b52242b9a8b02f3d0879bd481f23a3d719/> Don't panic on dates too far in the past when parsing them.
-
-### Other
-
- - <csr-id-28ac6572722f7ea31795dc0417521c70bcb6ec8f/> switch from `time` to `jiff`
-   This swaps out `time` for `jiff`. It doesn't completely remove `time`
-   from the dependency tree. The last remaining use of `time` is in
-   `prodash`, outside of the gitoxide project.
- - <csr-id-1b9c30dfb43373a76f3b65ae90a74dc99a892821/> bump MSRV to Rust 1.70
-   The bump to Rust 1.70 (released over 1 year ago) is needed since that's
-   Jiff current MSRV. This doesn't bump the MSRV of the broader gitoxide
-   project, however, so this is probably wrong or incomplete.
- - <csr-id-5a88413a2d3acb5c4ba5e49e47a42f0182d9e9fb/> make `time` a private dependency of `gix-date`
-   This should make the swap from `time` to `jiff` easier.
-   
-   This comment[1] indicates that it's okay for `time` to be a public
-   dependency, but since this patch series is about swapping `time` for
-   `jiff`, it seemed appropriate to take this step first. And in
-   particular, it was *almost* already the case that `time` was a private
-   dependency of `gix-date`. The only thing we really had to button up was
-   the exposure of `time`'s custom formatting description language.
-   
-   Jiff doesn't support `time`'s custom formatting machinery and instead
-   uses a strftime/strptime like API. We could expose that instead, but
-   since nothing (other than a test) was actually utilizing `time`'s custom
-   formatting machinery external to `gix-date`, I figured we might as well
-   completely encapsulate it.
 
 ### Commit Statistics
 
@@ -1066,15 +1322,12 @@ A maintenance release without user-facing changes.
 
  - <csr-id-3448fd9cc0edc93d7a5b511fd4ec0a8e84b87e51/> assure writing invalid dates doesn't panic.
 
-### Other
-
- - <csr-id-8d610ab8de7d3f62116632de6975f00c845dc842/> make clear that `Time::seconds` is UTC.
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 5 commits contributed to the release over the course of 24 calendar days.
+ - 61 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#1367](https://github.com/GitoxideLabs/gitoxide/issues/1367)
 
@@ -1149,20 +1402,12 @@ A maintenance release without user-facing changes.
 
 <csr-id-3bd09ef120945a9669321ea856db4079a5dab930/>
 
-### Chore
-
-- <csr-id-3bd09ef120945a9669321ea856db4079a5dab930/> change `rust-version` manifest field back to 1.65.
-  They didn't actually need to be higher to work, and changing them
-  unecessarily can break downstream CI.
-
-  Let's keep this value as low as possible, and only increase it when
-  more recent features are actually used.
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1182,17 +1427,12 @@ A maintenance release without user-facing changes.
 
 <csr-id-aea89c3ad52f1a800abb620e9a4701bdf904ff7d/>
 
-### Chore
-
-- <csr-id-aea89c3ad52f1a800abb620e9a4701bdf904ff7d/> upgrade MSRV to v1.70
-  Our MSRV follows the one of `helix`, which in turn follows Firefox.
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 7 commits contributed to the release over the course of 17 calendar days.
- - 22 days passed between releases.
+ - 23 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1221,6 +1461,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 9 commits contributed to the release.
+ - 89 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1281,7 +1522,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release over the course of 9 calendar days.
- - 9 days passed between releases.
+ - 10 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1307,10 +1548,6 @@ A maintenance release without user-facing changes.
 ## 0.7.3 (2023-08-22)
 
 <csr-id-229bd4899213f749a7cc124aa2b82a1368fba40f/>
-
-### Chore
-
-- <csr-id-229bd4899213f749a7cc124aa2b82a1368fba40f/> don't call crate 'WIP' in manifest anymore.
 
 ### Commit Statistics
 
@@ -1342,7 +1579,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 6 commits contributed to the release over the course of 4 calendar days.
- - 15 days passed between releases.
+ - 16 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#961](https://github.com/GitoxideLabs/gitoxide/issues/961)
 
@@ -1401,7 +1638,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 5 commits contributed to the release.
- - 6 days passed between releases.
+ - 7 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1423,10 +1660,6 @@ A maintenance release without user-facing changes.
 
 <csr-id-bcad5c22049d56a25ef69d6c7a3344e78f9a1d4d/>
 
-### Chore
-
-- <csr-id-bcad5c22049d56a25ef69d6c7a3344e78f9a1d4d/> Add `clippy::redundant-closure-for-method-calls` lint
-
 ### New Features (BREAKING)
 
  - <csr-id-4bc0ae1eb313ad83c793f397af9ca791b9b171e5/> Represent time as 64 bit integer.
@@ -1441,7 +1674,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 9 commits contributed to the release over the course of 11 calendar days.
- - 15 days passed between releases.
+ - 16 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1507,6 +1740,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 5 commits contributed to the release over the course of 2 calendar days.
+ - 58 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#814](https://github.com/GitoxideLabs/gitoxide/issues/814)
 
@@ -1529,12 +1763,6 @@ A maintenance release without user-facing changes.
 
 ### Bug Fixes
 
- - <csr-id-e14dc7d475373d2c266e84ff8f1826c68a34ab92/> note that crates have been renamed from `git-*` to `gix-*`.
-   This also means that the `git-*` prefixed crates of the `gitoxide` project
-   are effectively unmaintained.
-   Use the crates with the `gix-*` prefix instead.
-   
-   If you were using `git-repository`, then `gix` is its substitute.
  - <csr-id-135d317065aae87af302beb6c26bb6ca8e30b6aa/> compatibility with `bstr` v1.3, use `*.as_bytes()` instead of `.as_ref()`.
    `as_ref()` relies on a known target type which isn't always present. However, once
    there is only one implementation, that's no problem, but when that changes compilation
@@ -1566,13 +1794,6 @@ A maintenance release without user-facing changes.
 <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/>
 <csr-id-533e887e80c5f7ede8392884562e1c5ba56fb9a8/>
 
-### Other (BREAKING)
-
-- <csr-id-41fc2bb20e6a926ffc3638c0fac21d733fdc2e3c/> `time::format::GIT_DEFAULT` -> `*::DEFAULT` and `*::DEFAULT` -> `*::GITOXIDE`.
-  That way we properly indicate what we are doing and don't try to somewhat
-  sneakily suggest that the default for git dates is something else
-  due to personal preference.
-
 ### New Features (BREAKING)
 
  - <csr-id-3d8fa8fef9800b1576beab8a5bc39b821157a5ed/> upgrade edition to 2021 in most crates.
@@ -1590,11 +1811,6 @@ A maintenance release without user-facing changes.
 
  - <csr-id-99905bacace8aed42b16d43f0f04cae996cb971c/> upgrade `bstr` to `1.0.1`
  - <csr-id-c24ea67f84aa48953949682672114715bee67432/> parse now takes the current time `parse(…, Option<time>)` as parameter.
-
-### Chore
-
-- <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
-- <csr-id-533e887e80c5f7ede8392884562e1c5ba56fb9a8/> remove default link to cargo doc everywhere
 
 ### Documentation
 
@@ -1902,10 +2118,10 @@ A maintenance release without user-facing changes.
 
 ### Other (BREAKING)
 
-- <csr-id-41fc2bb20e6a926ffc3638c0fac21d733fdc2e3c/> `time::format::GIT_DEFAULT` -> `*::DEFAULT` and `*::DEFAULT` -> `*::GITOXIDE`.
-  That way we properly indicate what we are doing and don't try to somewhat
-  sneakily suggest that the default for git dates is something else
-  due to personal preference.
+ - <csr-id-41fc2bb20e6a926ffc3638c0fac21d733fdc2e3c/> `time::format::GIT_DEFAULT` -> `*::DEFAULT` and `*::DEFAULT` -> `*::GITOXIDE`.
+   That way we properly indicate what we are doing and don't try to somewhat
+   sneakily suggest that the default for git dates is something else
+   due to personal preference.
 
 ## 0.3.1 (2022-12-19)
 
@@ -1952,8 +2168,8 @@ A maintenance release without user-facing changes.
 
 ### Chore
 
-- <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
-- <csr-id-533e887e80c5f7ede8392884562e1c5ba56fb9a8/> remove default link to cargo doc everywhere
+ - <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
+ - <csr-id-533e887e80c5f7ede8392884562e1c5ba56fb9a8/> remove default link to cargo doc everywhere
 
 ### New Features
 

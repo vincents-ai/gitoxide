@@ -25,15 +25,14 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms, unsafe_code)]
+#![deny(missing_docs, unsafe_code)]
 ///
 pub mod time;
 
 ///
 pub mod parse;
+pub use jiff::Zoned;
 pub use parse::function::{parse, parse_header};
-
-pub use gix_error::ValidationError as Error;
 
 /// A timestamp with timezone.
 #[derive(Default, PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]

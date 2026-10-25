@@ -1,17 +1,18 @@
 use gix_diff::{
+    Rewrites,
     blob::DiffLineStats,
     rewrites,
     rewrites::{
-        tracker::{
-            visit::{Source, SourceKind},
-            ChangeKind,
-        },
         Copies, CopySource,
+        tracker::{
+            ChangeKind,
+            visit::{Source, SourceKind},
+        },
     },
     tree::visit::Relation,
-    Rewrites,
 };
 use gix_object::tree::EntryKind;
+use gix_testtools::TestResult;
 use pretty_assertions::assert_eq;
 
 use crate::{
@@ -20,7 +21,7 @@ use crate::{
 };
 
 #[test]
-fn rename_by_id() -> crate::Result {
+fn rename_by_id() -> TestResult {
     // Limits are only applied when doing rewrite-checks
     for limit in [0, 1] {
         let rewrites = Rewrites {
@@ -73,7 +74,64 @@ fn rename_by_id() -> crate::Result {
 }
 
 #[test]
-fn copy_by_similarity_reports_limit_if_encountered() -> crate::Result {
+fn gitlinks_are_renamed_only_by_id() {
+    let id = hex_to_id(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    let other_id = hex_to_id(
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    let gitlink = |id, kind| Change {
+        id,
+        kind,
+        mode: EntryKind::Commit.into(),
+        relation: None,
+    };
+
+    let mut tracker = util::new_tracker(Default::default());
+    assert!(
+        tracker
+            .try_push_change(gitlink(id, ChangeKind::Deletion), "old".into())
+            .is_none()
+    );
+    assert!(
+        tracker
+            .try_push_change(gitlink(id, ChangeKind::Addition), "new".into())
+            .is_none()
+    );
+    let mut matched = false;
+    util::assert_emit(&mut tracker, |destination, source| {
+        assert_eq!(destination.location, "new");
+        assert_eq!(source.expect("equal gitlink IDs form an exact rename").location, "old");
+        matched = true;
+        std::ops::ControlFlow::Continue(())
+    });
+    assert!(matched, "the exact gitlink rename was emitted");
+
+    let mut tracker = util::new_tracker(Default::default());
+    assert!(
+        tracker
+            .try_push_change(gitlink(id, ChangeKind::Deletion), "old".into())
+            .is_none()
+    );
+    assert!(
+        tracker
+            .try_push_change(gitlink(other_id, ChangeKind::Addition), "new".into())
+            .is_none()
+    );
+    let mut unmatched = 0;
+    util::assert_emit(&mut tracker, |_destination, source| {
+        assert!(source.is_none(), "gitlink IDs are never compared by blob similarity");
+        unmatched += 1;
+        std::ops::ControlFlow::Continue(())
+    });
+    assert_eq!(unmatched, 2, "both unrelated gitlink changes remain unmatched");
+}
+
+#[test]
+fn copy_by_similarity_reports_limit_if_encountered() -> TestResult {
     let rewrites = Rewrites {
         copies: Some(Copies {
             source: CopySource::FromSetOfModifiedFiles,
@@ -124,7 +182,7 @@ fn copy_by_similarity_reports_limit_if_encountered() -> crate::Result {
 }
 
 #[test]
-fn copy_by_id() -> crate::Result {
+fn copy_by_id() -> TestResult {
     // Limits are only applied when doing rewrite-checks
     for limit in [0, 1] {
         let rewrites = Rewrites {
@@ -202,7 +260,7 @@ fn copy_by_id() -> crate::Result {
 }
 
 #[test]
-fn copy_by_id_search_in_all_sources() -> crate::Result {
+fn copy_by_id_search_in_all_sources() -> TestResult {
     // Limits are only applied when doing rewrite-checks
     for limit in [0, 1] {
         let rewrites = Rewrites {
@@ -287,7 +345,7 @@ fn copy_by_id_search_in_all_sources() -> crate::Result {
 }
 
 #[test]
-fn copy_by_50_percent_similarity() -> crate::Result {
+fn copy_by_50_percent_similarity() -> TestResult {
     let rewrites = Rewrites {
         copies: Some(Copies {
             source: CopySource::FromSetOfModifiedFiles,
@@ -370,7 +428,7 @@ fn copy_by_50_percent_similarity() -> crate::Result {
 }
 
 #[test]
-fn copy_by_id_in_additions_only() -> crate::Result {
+fn copy_by_id_in_additions_only() -> TestResult {
     let rewrites = Rewrites {
         copies: Some(Copies {
             source: CopySource::FromSetOfModifiedFiles,
@@ -424,7 +482,7 @@ fn copy_by_id_in_additions_only() -> crate::Result {
 }
 
 #[test]
-fn rename_by_similarity_reports_limit_if_encountered() -> crate::Result {
+fn rename_by_similarity_reports_limit_if_encountered() -> TestResult {
     let rewrites = Rewrites {
         copies: None,
         percentage: Some(0.5),
@@ -470,7 +528,88 @@ fn rename_by_similarity_reports_limit_if_encountered() -> crate::Result {
 }
 
 #[test]
-fn rename_by_50_percent_similarity() -> crate::Result {
+fn rename_by_similarity_limit_applies_per_side() -> TestResult {
+    let rewrites = Rewrites {
+        copies: None,
+        percentage: Some(0.5),
+        limit: 2,
+        track_empty: false,
+    };
+    let mut track = util::new_tracker(rewrites);
+    let odb = util::add_retained_blobs(
+        &mut track,
+        [
+            (Change::deletion(), "a", "a1\na2\na3\n"),
+            (Change::deletion(), "b", "b1\nb2\nb3\n"),
+            (Change::addition(), "c", "a1\na2\nA3\n"),
+            (Change::addition(), "d", "b1\nb2\nB3\n"),
+        ],
+    )?;
+
+    let mut pairs = Vec::new();
+    let out = util::assert_emit_with_objects(
+        &mut track,
+        |dst, src| {
+            pairs.push((src.map(|src| src.location.to_string()), dst.location.to_string()));
+            std::ops::ControlFlow::Continue(())
+        },
+        odb,
+    );
+    pairs.sort();
+    assert_eq!(
+        pairs,
+        [
+            (Some("a".to_string()), "c".to_string()),
+            (Some("b".to_string()), "d".to_string()),
+        ],
+        "2 sources x 2 destinations fit into a limit of 2, as it allows 2*2 combinations"
+    );
+    assert_eq!(out.num_similarity_checks_skipped_for_rename_tracking_due_to_limit, 0);
+    Ok(())
+}
+
+#[test]
+fn rename_by_similarity_is_skipped_above_squared_limit() -> TestResult {
+    let rewrites = Rewrites {
+        copies: None,
+        percentage: Some(0.5),
+        limit: 2,
+        track_empty: false,
+    };
+    let mut track = util::new_tracker(rewrites);
+    let odb = util::add_retained_blobs(
+        &mut track,
+        [
+            (Change::deletion(), "a", "a1\na2\na3\n"),
+            (Change::deletion(), "b", "b1\nb2\nb3\n"),
+            (Change::deletion(), "e", "e1\ne2\ne3\n"),
+            (Change::addition(), "c", "a1\na2\nA3\n"),
+            (Change::addition(), "d", "b1\nb2\nB3\n"),
+        ],
+    )?;
+
+    let out = util::assert_emit_with_objects(
+        &mut track,
+        |_dst, src| {
+            assert!(src.is_none(), "no pairing is attempted above the limit");
+            std::ops::ControlFlow::Continue(())
+        },
+        odb,
+    );
+    assert_eq!(
+        out,
+        rewrites::Outcome {
+            options: rewrites,
+            num_similarity_checks_skipped_for_rename_tracking_due_to_limit: 6,
+            ..Default::default()
+        },
+        "3 sources x 2 destinations exceed the 2*2 combinations a limit of 2 allows"
+    );
+    Ok(())
+}
+
+#[test]
+fn rename_by_50_percent_similarity() -> TestResult {
     let rewrites = Rewrites {
         copies: None,
         percentage: Some(0.5),
@@ -555,26 +694,83 @@ fn rename_by_50_percent_similarity() -> crate::Result {
 }
 
 #[test]
-fn directories_without_relation_are_ignored() -> crate::Result {
-    let mut track = util::new_tracker(Default::default());
-    for mode in [EntryKind::Tree, EntryKind::Commit] {
-        let tree_without_relation = Change {
-            id: *NULL_ID,
-            kind: ChangeKind::Deletion,
-            mode: mode.into(),
-            relation: None,
-        };
-        assert_eq!(
-            track.try_push_change(tree_without_relation, "dir".into()),
-            Some(tree_without_relation),
-            "trees and submodules are ignored, particularly when they have no relation"
-        );
-    }
+fn rename_by_similarity_prefers_stronger_match_over_same_filename_match() -> TestResult {
+    let rewrites = Rewrites {
+        copies: None,
+        percentage: Some(0.5),
+        limit: 0,
+        track_empty: false,
+    };
+    let mut track = util::new_tracker(rewrites);
+    let odb = util::add_retained_blobs(
+        &mut track,
+        [
+            (Change::deletion(), "old/foo", "1\n2\n3\n4\n5\n"),
+            (Change::deletion(), "bar", "1\n2\n3\n4\n5\n6\n7\n"),
+            (Change::addition(), "new/foo", "1\n2\n3\n4\n5\n6\n7\n8\n"),
+        ],
+    )?;
+
+    let mut calls = 0;
+    let out = util::assert_emit_with_objects(
+        &mut track,
+        |dst, src| {
+            match calls {
+                0 => {
+                    let src = src.expect("destination should find a rename source");
+                    assert_eq!(
+                        src.location, "bar",
+                        "the strongest similarity match wins before basename is used as a tie-breaker"
+                    );
+                    assert_eq!(dst.location, "new/foo");
+                    assert!(
+                        src.diff.expect("similarity match includes diff stats").similarity > 0.8,
+                        "the selected source should be the high-similarity candidate"
+                    );
+                }
+                1 => {
+                    assert_eq!(src, None, "the weaker same-filename source remains unmatched");
+                    assert_eq!(dst.location, "old/foo");
+                }
+                _ => panic!("too many elements emitted"),
+            }
+            calls += 1;
+            std::ops::ControlFlow::Continue(())
+        },
+        odb,
+    );
+    assert_eq!(
+        out,
+        rewrites::Outcome {
+            options: rewrites,
+            num_similarity_checks: 2,
+            ..Default::default()
+        },
+        "all viable sources are compared before selecting the best rename source"
+    );
+    assert_eq!(calls, 2, "both the rename and the unmatched deletion should be emitted");
     Ok(())
 }
 
 #[test]
-fn directory_renames_by_id_can_fail_gracefully() -> crate::Result {
+fn directories_without_relation_are_ignored() -> TestResult {
+    let mut track = util::new_tracker(Default::default());
+    let tree_without_relation = Change {
+        id: *NULL_ID,
+        kind: ChangeKind::Deletion,
+        mode: EntryKind::Tree.into(),
+        relation: None,
+    };
+    assert_eq!(
+        track.try_push_change(tree_without_relation, "dir".into()),
+        Some(tree_without_relation),
+        "trees without a relation are ignored"
+    );
+    Ok(())
+}
+
+#[test]
+fn directory_renames_by_id_can_fail_gracefully() -> TestResult {
     let rename_by_similarity = Rewrites {
         copies: None,
         percentage: Some(0.5),
@@ -587,34 +783,38 @@ fn directory_renames_by_id_can_fail_gracefully() -> crate::Result {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     );
-    assert!(track
-        .try_push_change(
-            Change {
-                id: tree_id,
-                kind: ChangeKind::Addition,
-                mode: EntryKind::Tree.into(),
-                relation: Some(Relation::Parent(tree_dst_id)),
-            },
-            "d-renamed".into()
-        )
-        .is_none());
+    assert!(
+        track
+            .try_push_change(
+                Change {
+                    id: tree_id,
+                    kind: ChangeKind::Addition,
+                    mode: EntryKind::Tree.into(),
+                    relation: Some(Relation::Parent(tree_dst_id)),
+                },
+                "d-renamed".into()
+            )
+            .is_none()
+    );
 
     let tree_src_id = 3;
     let tree_id = hex_to_id(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
-    assert!(track
-        .try_push_change(
-            Change {
-                id: tree_id,
-                kind: ChangeKind::Addition,
-                mode: EntryKind::Tree.into(),
-                relation: Some(Relation::Parent(tree_src_id)),
-            },
-            "d".into()
-        )
-        .is_none());
+    assert!(
+        track
+            .try_push_change(
+                Change {
+                    id: tree_id,
+                    kind: ChangeKind::Addition,
+                    mode: EntryKind::Tree.into(),
+                    relation: Some(Relation::Parent(tree_src_id)),
+                },
+                "d".into()
+            )
+            .is_none()
+    );
     let odb = util::add_retained_blobs(
         &mut track,
         [
@@ -666,7 +866,7 @@ fn directory_renames_by_id_can_fail_gracefully() -> crate::Result {
                 out,
                 rewrites::Outcome {
                     options: rename_by_similarity,
-                    num_similarity_checks: 1,
+                    num_similarity_checks: 2,
                     ..Default::default()
                 }
             );
@@ -719,7 +919,7 @@ fn directory_renames_by_id_can_fail_gracefully() -> crate::Result {
 }
 
 #[test]
-fn simple_directory_rename_by_id() -> crate::Result {
+fn simple_directory_rename_by_id() -> TestResult {
     let renames_by_identity = Rewrites {
         copies: None,
         percentage: None,
@@ -728,13 +928,17 @@ fn simple_directory_rename_by_id() -> crate::Result {
     };
     let mut track = util::new_tracker(renames_by_identity);
     let tree_dst_id = 1;
-    assert!(track
-        .try_push_change(Change::tree_addition(tree_dst_id), "d-renamed".into())
-        .is_none());
+    assert!(
+        track
+            .try_push_change(Change::tree_addition(tree_dst_id), "d-renamed".into())
+            .is_none()
+    );
     let tree_src_id = 3;
-    assert!(track
-        .try_push_change(Change::tree_deletion(tree_src_id), "d".into())
-        .is_none());
+    assert!(
+        track
+            .try_push_change(Change::tree_deletion(tree_src_id), "d".into())
+            .is_none()
+    );
     let tree_id = hex_to_id(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -754,17 +958,19 @@ fn simple_directory_rename_by_id() -> crate::Result {
         "trees that are children are kept and matched. That way, they can quickly be pruned which is done first.\
         Those who don't need them can prune them in a later step."
     );
-    assert!(track
-        .try_push_change(
-            Change {
-                id: tree_id,
-                kind: ChangeKind::Addition,
-                mode: EntryKind::Tree.into(),
-                relation: Some(Relation::ChildOfParent(tree_dst_id)),
-            },
-            "d-renamed/subdir".into(),
-        )
-        .is_none());
+    assert!(
+        track
+            .try_push_change(
+                Change {
+                    id: tree_id,
+                    kind: ChangeKind::Addition,
+                    mode: EntryKind::Tree.into(),
+                    relation: Some(Relation::ChildOfParent(tree_dst_id)),
+                },
+                "d-renamed/subdir".into(),
+            )
+            .is_none()
+    );
     let _odb = util::add_retained_blobs(
         &mut track,
         [
@@ -880,7 +1086,7 @@ fn simple_directory_rename_by_id() -> crate::Result {
 }
 
 #[test]
-fn remove_only() -> crate::Result {
+fn remove_only() -> TestResult {
     let mut track = util::new_tracker(Default::default());
     assert!(
         track.try_push_change(Change::deletion(), "a".into()).is_none(),
@@ -901,7 +1107,7 @@ fn remove_only() -> crate::Result {
 }
 
 #[test]
-fn add_only() -> crate::Result {
+fn add_only() -> TestResult {
     let mut track = util::new_tracker(Default::default());
     assert!(
         track.try_push_change(Change::addition(), "a".into()).is_none(),
@@ -920,24 +1126,188 @@ fn add_only() -> crate::Result {
     Ok(())
 }
 
+#[test]
+fn many_additions_without_sources() -> TestResult {
+    use std::fmt::Write;
+
+    // Destinations should only be compared to possible sources, not to all other destinations, which would take
+    // quadratic time.
+    let rewrites = Rewrites {
+        copies: Some(Copies {
+            source: CopySource::FromSetOfModifiedFiles,
+            percentage: Some(0.5),
+        }),
+        percentage: Some(0.5),
+        limit: 0,
+        track_empty: false,
+    };
+    let mut track = util::new_tracker(rewrites);
+    let num_additions: usize = 100_000;
+    let mut location = String::with_capacity(5);
+    for idx in 0..num_additions {
+        location.clear();
+        write!(&mut location, "{idx}")?;
+        assert!(
+            track
+                .try_push_change(Change::addition(), location.as_str().into())
+                .is_none(),
+            "recorded for later matching"
+        );
+    }
+    let mut calls = 0;
+    let out = util::assert_emit(&mut track, |dst, src| {
+        calls += 1;
+        assert!(src.is_none(), "there are no sources to pair with");
+        assert_eq!(
+            dst.change.kind,
+            ChangeKind::Addition,
+            "only the additions are emitted as destinations"
+        );
+        std::ops::ControlFlow::Continue(())
+    });
+    assert_eq!(calls, num_additions, "each addition results in one emitted destination");
+    assert_eq!(
+        out.num_similarity_checks, 0,
+        "without possible sources, no similarity checks are performed"
+    );
+    Ok(())
+}
+
+#[test]
+fn rename_tracking_is_order_independent() -> TestResult {
+    // #1832: exactly one of several identical-content additions can be matched as the rename of a
+    // deletion. Which one is chosen must not depend on the order in which items are pushed - but
+    // the parallel dirwalk and index-traversal threads deliver them in a nondeterministic order,
+    // which is what makes the corresponding `gix-status` test intermittently fail on CI.
+    let renames_by_identity = Rewrites {
+        copies: None,
+        percentage: None,
+        limit: 0,
+        track_empty: false,
+    };
+    let changes = vec![
+        (Change::deletion(), "src", "identical\n"),
+        (Change::addition(), "a-dest", "identical\n"),
+        (Change::addition(), "b-dest", "identical\n"),
+    ];
+
+    let mut reference: Option<Vec<(String, Option<String>)>> = None;
+    for order in permutations(changes.clone()) {
+        let mut track = util::new_tracker(renames_by_identity);
+        util::add_retained_blobs(&mut track, order.iter().copied())?;
+        let mut pairs = Vec::new();
+        util::assert_emit(&mut track, |dst, src| {
+            pairs.push((dst.location.to_string(), src.map(|src| src.location.to_string())));
+            std::ops::ControlFlow::Continue(())
+        });
+        match &reference {
+            None => reference = Some(pairs),
+            Some(reference) => assert_eq!(
+                &pairs, reference,
+                "rename tracking must produce the same result regardless of the input order"
+            ),
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn copy_source_selection_is_order_independent() -> TestResult {
+    // #1832, exhaustive-copy variant: with copies searched against all sources - including the whole
+    // source tree that is pushed in during `emit` - the source chosen for an identical-content
+    // destination must not depend on the order items were pushed. This also exercises the second
+    // sort (after `push_source_tree`) that the rename test above never reaches.
+    let rewrites = Rewrites {
+        copies: Some(Copies {
+            source: CopySource::FromSetOfModifiedFilesAndAllSources,
+            percentage: None,
+        }),
+        percentage: None,
+        limit: 0,
+        track_empty: false,
+    };
+    // The blob id of "a"; all destinations and sources share it, so the copy source is ambiguous and
+    // would otherwise be picked based on push order.
+    let content_id = hex_to_id(
+        "2e65efe2a145dda7ee51d1741299f848e5bf752e",
+        "eb337bcee2061c5313c9a1392116b6c76039e9e30d71467ae359b36277e17dc7",
+    );
+
+    let mut reference: Option<Vec<(String, Option<String>)>> = None;
+    for dests in permutations(vec!["a-cpy-1", "a-cpy-2"]) {
+        for sources in permutations(vec!["a-src-1", "a-src-2"]) {
+            let mut track = util::new_tracker(rewrites);
+            let odb = util::add_retained_blobs(
+                &mut track,
+                dests.iter().map(|location| (Change::addition(), *location, "a")),
+            )?;
+            let mut pairs = Vec::new();
+            util::assert_emit_with_objects_and_sources(
+                &mut track,
+                |dst, src| {
+                    pairs.push((dst.location.to_string(), src.map(|src| src.location.to_string())));
+                    std::ops::ControlFlow::Continue(())
+                },
+                odb,
+                sources.iter().map(|location| {
+                    (
+                        Change {
+                            id: content_id,
+                            ..Change::modification()
+                        },
+                        *location,
+                    )
+                }),
+            );
+            match &reference {
+                None => reference = Some(pairs),
+                Some(reference) => assert_eq!(
+                    &pairs, reference,
+                    "copy source selection must be independent of the input order"
+                ),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Inefficient but small implemenation, for use with small inputs only.
+fn permutations<T: Clone>(items: Vec<T>) -> Vec<Vec<T>> {
+    if items.len() <= 1 {
+        return vec![items];
+    }
+    let mut out = Vec::new();
+    for idx in 0..items.len() {
+        let mut rest = items.clone();
+        let head = rest.remove(idx);
+        for mut perm in permutations(rest) {
+            perm.insert(0, head.clone());
+            out.push(perm);
+        }
+    }
+    out
+}
 mod util {
+    use crate::Result;
     use gix_diff::{
-        rewrites,
+        Rewrites, rewrites,
         rewrites::tracker::visit::{Destination, Source},
         tree::visit::Action,
-        Rewrites,
     };
 
-    use crate::{rewrites::Change, util::ObjectDb};
+    use crate::{
+        rewrites::Change,
+        util::{ObjectDb, insert, object_db},
+    };
 
     /// Add `blobs` `(change, location, data)` to tracker that will all be retained. Note that the `id` of the respective change will be adjusted to match.
     pub fn add_retained_blobs<'a>(
         tracker: &mut rewrites::Tracker<Change>,
         blobs: impl IntoIterator<Item = (Change, &'a str, &'a str)>,
-    ) -> crate::Result<ObjectDb> {
-        let mut db = ObjectDb::default();
+    ) -> Result<ObjectDb> {
+        let db = object_db();
         for (mut change, location, data) in blobs {
-            change.id = db.insert(data)?;
+            change.id = insert(&db, data)?;
             assert!(
                 tracker.try_push_change(change, location.into()).is_none(),
                 "input changes must be tracked"
@@ -973,7 +1343,7 @@ mod util {
                 cb,
                 &mut new_platform_no_worktree(),
                 &objects,
-                |cb| -> Result<(), std::io::Error> {
+                |cb| -> std::result::Result<(), std::io::Error> {
                     let sources = std::mem::take(&mut sources);
                     if sources.is_empty() {
                         panic!("Should not access more sources unless these are specified");
@@ -992,7 +1362,7 @@ mod util {
     }
 
     fn new_platform_no_worktree() -> gix_diff::blob::Platform {
-        let root = gix_testtools::scripted_fixture_read_only_standalone("make_blob_repo.sh").expect("valid fixture");
+        let root = crate::scripted_fixture_read_only("make_blob_repo.sh").expect("valid fixture");
         let attributes = gix_worktree::Stack::new(
             root,
             gix_worktree::stack::State::AttributesStack(gix_worktree::stack::state::Attributes::new(
@@ -1007,7 +1377,7 @@ mod util {
         );
         let filter = gix_diff::blob::Pipeline::new(
             Default::default(),
-            gix_filter::Pipeline::default(),
+            gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
             Vec::new(),
             Default::default(),
         );

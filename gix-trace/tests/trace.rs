@@ -1,4 +1,15 @@
 use gix_trace::{coarse, debug, detail, error, event, info, span, trace, warn};
+
+#[test]
+fn in_thread_returns_the_closure_output() {
+    let mut value = 41;
+    let result = gix_trace::in_thread(|| {
+        value += 1;
+        value
+    })();
+    assert_eq!(result, 42, "the wrapper supports borrowed data and returns the result");
+}
+
 #[test]
 fn span() {
     let _x = span!(gix_trace::Level::Coarse, "hello");
@@ -17,12 +28,10 @@ fn coarse() {
         event!(gix_trace::event::Level::WARN, "an info: {}", 42);
         event!(gix_trace::event::Level::INFO, answer = 42, field = "some");
         #[derive(Debug)]
-        #[allow(dead_code)]
         struct User {
             name: &'static str,
             email: &'static str,
         }
-        #[allow(unused_variables)]
         let user = User {
             name: "ferris",
             email: "ferris@example.com",

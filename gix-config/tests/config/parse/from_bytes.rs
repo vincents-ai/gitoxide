@@ -10,9 +10,25 @@ fn fuzz() {
         Events::from_str(include_str!(
             "../../fixtures/clusterfuzz-testcase-minimized-gix-config-parse-6431708583690240"
         ))
-            .is_err(),
+        .is_err(),
         "works without hanging - these 400kb take 10s in debug mode right now, but just as long in release mode. With nom all tests ran in below 1s in debug mode"
     );
+}
+
+#[test]
+fn filters_receive_event_refs_for_content_access() -> gix_testtools::TestResult {
+    fn reject_drop_values(event: EventRef<'_>) -> bool {
+        !matches!(event, EventRef::Value(value) if value == b"drop".as_slice())
+    }
+    let events = Events::from_bytes(b"[core]\nkeep = keep\ndrop = drop\n", Some(reject_drop_values))?;
+
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, EventRef::Value(value) if value == b"drop".as_slice())),
+        "the filter can reject events by inspecting their value bytes"
+    );
+    Ok(())
 }
 
 #[test]
@@ -38,11 +54,9 @@ fn complex() {
 [init]
         defaultBranch = master"#;
 
+    let events = Events::from_str(config).unwrap();
     assert_eq!(
-        Events::from_str(config)
-            .unwrap()
-            .into_iter()
-            .collect::<Vec<_>>(),
+        events.iter().collect::<Vec<_>>(),
         vec![
             section::header_event("user", None),
             newline(),
@@ -164,12 +178,20 @@ fn skips_bom() {
         a = 1
 ";
 
+    fn render_events(events: &Events) -> Vec<u8> {
+        let mut out = Vec::new();
+        for event in events.iter() {
+            event.write_to(&mut out).expect("in-memory writes cannot fail");
+        }
+        out
+    }
+
     assert_eq!(
-        Events::from_bytes(bytes, None),
-        Events::from_bytes(bytes_with_gb18030_bom.as_bytes(), None)
+        Events::from_bytes(bytes, None).map(|events| render_events(&events)),
+        Events::from_bytes(bytes_with_gb18030_bom.as_bytes(), None).map(|events| render_events(&events))
     );
     assert_eq!(
-        Events::from_bytes_owned(bytes, None),
-        Events::from_bytes_owned(bytes_with_gb18030_bom.as_bytes(), None)
+        Events::from_bytes(bytes, None).map(|events| render_events(&events)),
+        Events::from_bytes(bytes_with_gb18030_bom.as_bytes(), None).map(|events| render_events(&events))
     );
 }

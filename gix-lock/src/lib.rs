@@ -18,7 +18,7 @@
 //! ## Examples
 //!
 //! ```
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! use std::io::Write;
 //!
 //! # let dir = tempfile::tempdir()?;
@@ -28,6 +28,7 @@
 //!     &resource,
 //!     gix_lock::acquire::Fail::Immediately,
 //!     None,
+//!     0,
 //! )?;
 //! lock.write_all(b"new = value\n")?;
 //! let (resource_path, _) = lock.commit()?;
@@ -36,7 +37,7 @@
 //! assert_eq!(std::fs::read_to_string(&resource)?, "new = value\n");
 //! # Ok(()) }
 //! ```
-#![deny(missing_docs, rust_2018_idioms, unsafe_code)]
+#![deny(missing_docs, unsafe_code)]
 
 use std::path::PathBuf;
 
@@ -60,6 +61,7 @@ pub mod commit;
 pub struct File {
     inner: gix_tempfile::Handle<Writable>,
     lock_path: PathBuf,
+    resource_path: PathBuf,
 }
 
 /// Locks a resource to allow related resources to be updated using [files][File].
@@ -72,6 +74,7 @@ pub struct Marker {
     inner: gix_tempfile::Handle<Closed>,
     created_from_file: bool,
     lock_path: PathBuf,
+    resource_path: PathBuf,
 }
 
 ///

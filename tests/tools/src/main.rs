@@ -1,5 +1,8 @@
 use std::{fs, io, io::prelude::*, path::PathBuf};
 
+#[cfg(feature = "sbom")]
+mod sbom;
+
 fn bash_program() -> io::Result<()> {
     use std::io::IsTerminal;
     if !std::io::stdout().is_terminal() {
@@ -23,6 +26,7 @@ fn umask() -> io::Result<()> {
 }
 
 /// Run a Git protocol test daemon on an OS-assigned loopback port.
+/// This function blocks and the process needs to be killed.
 ///
 /// Journey tests use this instead of `git daemon --port=<n>` because Git
 /// treats `--port=0` as "use the default port", so it can't bind an
@@ -31,73 +35,11 @@ fn umask() -> io::Result<()> {
 /// hands every accepted connection to `git daemon --inetd`.
 #[cfg(unix)]
 fn git_daemon(url_file: PathBuf) -> io::Result<()> {
-    use std::{
-        net::{TcpListener, TcpStream},
-        os::fd::{FromRawFd, IntoRawFd},
-        process::{Command, Stdio},
-        thread,
-    };
-
-    fn stream_to_stdio(stream: TcpStream) -> Stdio {
-        // SAFETY: `into_raw_fd()` transfers ownership of the socket fd, and `Stdio`
-        // takes over closing it in the spawned child.
-        unsafe { Stdio::from_raw_fd(stream.into_raw_fd()) }
+    let daemon = gix_testtools::spawn_git_daemon(".")?;
+    fs::write(url_file, format!("{}/\n", daemon.url))?;
+    loop {
+        std::thread::park();
     }
-
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    let addr = listener.local_addr()?;
-    fs::write(url_file, format!("git://{addr}/\n"))?;
-
-    for incoming in listener.incoming() {
-        let stream = incoming?;
-        let peer_addr = stream.peer_addr().ok();
-        let stdin = stream_to_stdio(stream.try_clone()?);
-        let stdout = stream_to_stdio(stream);
-
-        let mut child = Command::new("git")
-            .args([
-                "-c",
-                "uploadpack.allowrefinwant",
-                "daemon",
-                "--inetd",
-                "--verbose",
-                "--base-path=.",
-                "--export-all",
-                "--user-path",
-            ])
-            .stdin(stdin)
-            .stdout(stdout)
-            .stderr(Stdio::null())
-            .envs(remote_env(peer_addr))
-            .spawn()?;
-
-        thread::spawn(move || {
-            // Make sure we don't create zombies but wait for all children to finish.
-            // Also needed to have our process has handle to all possibly running Git invocations.
-            let _ = child.wait();
-        });
-    }
-
-    Ok(())
-}
-
-/// Return the client-address environment Git's own daemon loop would set.
-///
-/// In `--inetd` mode Git doesn't accept the socket itself, so it can't derive
-/// `REMOTE_ADDR` and `REMOTE_PORT`. The wrapper owns `accept()`, and passes
-/// these values along for code paths that log or inspect peer information.
-///
-/// As such, it's optional and not needed for it to function.
-#[cfg(unix)]
-fn remote_env(peer_addr: Option<std::net::SocketAddr>) -> Vec<(&'static str, String)> {
-    peer_addr
-        .map(|addr| {
-            vec![
-                ("REMOTE_ADDR", addr.ip().to_string()),
-                ("REMOTE_PORT", addr.port().to_string()),
-            ]
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(not(unix))]
@@ -108,16 +50,27 @@ fn git_daemon(_url_file: PathBuf) -> io::Result<()> {
     ))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = std::env::args().skip(1);
+fn main() -> gix_testtools::Result {
+    let mut args = std::env::args_os().skip(1);
     let scmd = args.next().expect("sub command");
-    match &*scmd {
+    match scmd.to_str().ok_or("subcommand is not UTF-8")? {
+        #[cfg(feature = "sbom")]
+        "sbom" => sbom::run(args)?,
+        "run" => {
+            let mut cmd = std::process::Command::new(args.next().ok_or("run requires a program")?);
+            let config_dir = gix_testtools::tempfile::TempDir::new()?;
+            let status = gix_testtools::configure_git_environment(&mut cmd, config_dir.path())
+                .args(args)
+                .status()?;
+            drop(config_dir);
+            std::process::exit(status.code().unwrap_or(1));
+        }
         "bash-program" | "bp" => bash_program()?,
         "git-daemon" => git_daemon(PathBuf::from(args.next().expect("path to write the git:// URL to")))?,
         "mess-in-the-middle" => mess_in_the_middle(PathBuf::from(args.next().expect("path to file to mess with")))?,
         #[cfg(unix)]
         "umask" => umask()?,
-        _ => unreachable!("Unknown subcommand: {}", scmd),
+        _ => unreachable!("Unknown subcommand: {}", scmd.to_string_lossy()),
     }
     Ok(())
 }

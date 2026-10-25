@@ -1,3 +1,4 @@
+use gix_error::Result;
 use gix_transport::client::Capabilities;
 
 /// Convert a hexadecimal hash into its corresponding `ObjectId` or _panic_.
@@ -5,10 +6,12 @@ fn oid(hex: &str) -> gix_hash::ObjectId {
     gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("40 bytes hex")
 }
 
-use gix_protocol::handshake::{refs, Ref};
+use gix_protocol::handshake::{Ref, refs};
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn extract_references_from_v2_refs() {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn extract_references_from_v2_refs() -> gix_testtools::TestResult {
     let input = &mut Fixture(
         "808e50d724f604f69ab93c6da2919c014667bedb HEAD symref-target:refs/heads/main
 808e50d724f604f69ab93c6da2919c014667bedb MISSING_NAMESPACE_TARGET symref-target:(null)
@@ -22,7 +25,7 @@ unborn refs/heads/symbolic symref-target:refs/heads/target
             .as_bytes(),
     );
 
-    let out = refs::from_v2_refs(input).await.expect("no failure on valid input");
+    let out = refs::from_v2_refs(input).await?;
 
     assert_eq!(
         out,
@@ -66,10 +69,13 @@ unborn refs/heads/symbolic symref-target:refs/heads/target
             },
         ]
     );
+    Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn extract_references_from_v1_refs() {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn extract_references_from_v1_refs() -> gix_testtools::TestResult {
     let input = &mut Fixture(
         "73a6868963993a3328e7d8fe94e5a6ac5078a944 HEAD
 21c9b7500cb144b3169a6537961ec2b9e865be81 MISSING_NAMESPACE_TARGET
@@ -81,13 +87,11 @@ dce0ea858eef7ff61ad345cc5cdac62203fb3c10 refs/tags/gix-commitgraph-v0.0.0
     );
     let (out, shallow) = refs::from_v1_refs_received_as_part_of_handshake_and_capabilities(
         input,
-        Capabilities::from_bytes(b"\0symref=HEAD:refs/heads/main symref=MISSING_NAMESPACE_TARGET:(null)")
-            .expect("valid capabilities")
+        Capabilities::from_bytes(b"\0symref=HEAD:refs/heads/main symref=MISSING_NAMESPACE_TARGET:(null)")?
             .0
             .iter(),
     )
-    .await
-    .expect("no failure from valid input");
+    .await?;
     assert!(shallow.is_empty());
     assert_eq!(
         out,
@@ -117,10 +121,13 @@ dce0ea858eef7ff61ad345cc5cdac62203fb3c10 refs/tags/gix-commitgraph-v0.0.0
             },
         ]
     );
+    Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn extract_references_from_v1_refs_with_shallow() {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn extract_references_from_v1_refs_with_shallow() -> gix_testtools::TestResult {
     use gix_protocol::fetch::response::ShallowUpdate;
     let input = &mut Fixture(
         "73a6868963993a3328e7d8fe94e5a6ac5078a944 HEAD
@@ -135,13 +142,11 @@ shallow dce0ea858eef7ff61ad345cc5cdac62203fb3c10"
     );
     let (out, shallow) = refs::from_v1_refs_received_as_part_of_handshake_and_capabilities(
         input,
-        Capabilities::from_bytes(b"\0symref=HEAD:refs/heads/main symref=MISSING_NAMESPACE_TARGET:(null)")
-            .expect("valid capabilities")
+        Capabilities::from_bytes(b"\0symref=HEAD:refs/heads/main symref=MISSING_NAMESPACE_TARGET:(null)")?
             .0
             .iter(),
     )
-    .await
-    .expect("no failure from valid input");
+    .await?;
 
     assert_eq!(
         shallow,
@@ -178,6 +183,7 @@ shallow dce0ea858eef7ff61ad345cc5cdac62203fb3c10"
             },
         ]
     );
+    Ok(())
 }
 
 #[cfg(any(feature = "async-client", feature = "blocking-client"))]
@@ -203,9 +209,7 @@ impl std::io::BufRead for Fixture<'_> {
 
 #[cfg(feature = "blocking-client")]
 impl gix_transport::client::blocking_io::ReadlineBufRead for Fixture<'_> {
-    fn readline(
-        &mut self,
-    ) -> Option<std::io::Result<Result<gix_packetline::PacketLineRef<'_>, gix_packetline::decode::Error>>> {
+    fn readline(&mut self) -> Option<std::result::Result<Result<gix_packetline::PacketLineRef<'_>>, std::io::Error>> {
         use bstr::{BStr, ByteSlice};
         let bytes: &BStr = self.0.into();
         let mut lines = bytes.lines();
@@ -229,17 +233,17 @@ impl gix_transport::client::blocking_io::ReadlineBufRead for Fixture<'_> {
     }
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 impl<'a> Fixture<'a> {
     fn project_inner(self: std::pin::Pin<&mut Self>) -> std::pin::Pin<&mut &'a [u8]> {
-        #[allow(unsafe_code)]
+        #[expect(unsafe_code)]
         unsafe {
             std::pin::Pin::new(&mut self.get_unchecked_mut().0)
         }
     }
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 impl futures_io::AsyncRead for Fixture<'_> {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -250,7 +254,7 @@ impl futures_io::AsyncRead for Fixture<'_> {
     }
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 impl futures_io::AsyncBufRead for Fixture<'_> {
     fn poll_fill_buf(
         self: std::pin::Pin<&mut Self>,
@@ -264,12 +268,10 @@ impl futures_io::AsyncBufRead for Fixture<'_> {
     }
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 #[async_trait::async_trait(?Send)]
 impl gix_transport::client::async_io::ReadlineBufRead for Fixture<'_> {
-    async fn readline(
-        &mut self,
-    ) -> Option<std::io::Result<Result<gix_packetline::PacketLineRef<'_>, gix_packetline::decode::Error>>> {
+    async fn readline(&mut self) -> Option<std::io::Result<Result<gix_packetline::PacketLineRef<'_>>>> {
         use bstr::{BStr, ByteSlice};
         let bytes: &BStr = self.0.into();
         let mut lines = bytes.lines();

@@ -1,7 +1,11 @@
+pub mod bisync {
+    pub use gix_macros::{discard as only_async, keep as only_sync, sync as bisync};
+}
+
 use std::path::PathBuf;
 
-pub type Error = Box<dyn std::error::Error>;
-pub type Result<T = ()> = std::result::Result<T, Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub use gix_testtools::TestResult;
 
 pub fn fixture_bytes(path: &str) -> Vec<u8> {
     fn fixture_path(path: &str) -> PathBuf {
@@ -9,6 +13,9 @@ pub fn fixture_bytes(path: &str) -> Vec<u8> {
     }
     std::fs::read(fixture_path(path)).expect("fixture to be present and readable")
 }
+
+#[cfg(all(feature = "http-client", not(feature = "http-client-curl")))]
+mod http_helpers;
 
 #[cfg(not(feature = "http-client-curl"))]
 mod client;

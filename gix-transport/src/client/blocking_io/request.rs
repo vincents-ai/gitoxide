@@ -1,8 +1,8 @@
 use std::{io, io::Write};
 
 use crate::{
-    client::{blocking_io::ExtendedBufRead, MessageKind, WriteMode},
-    packetline::blocking_io::{encode, Writer},
+    client::{MessageKind, WriteMode, blocking_io::ExtendedBufRead},
+    packetline::blocking_io::{Writer, encode},
 };
 
 /// A [`Write`][io::Write] implementation optimized for writing packet lines.
@@ -17,10 +17,8 @@ pub struct RequestWriter<'a> {
 
 impl io::Write for RequestWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        #[allow(unused_imports)]
         if self.trace {
-            use bstr::ByteSlice;
-            gix_features::trace::trace!(">> {}", buf.as_bstr());
+            gix_trace::trace!(">> {}", bstr::BStr::new(buf));
         }
         self.writer.write(buf)
     }
@@ -61,27 +59,25 @@ impl<'a> RequestWriter<'a> {
         match message {
             MessageKind::Flush => {
                 if self.trace {
-                    gix_features::trace::trace!(">> FLUSH");
+                    gix_trace::trace!(">> FLUSH");
                 }
                 encode::write_packet_line(&gix_packetline::PacketLineRef::Flush, self.writer.inner_mut())
             }
             MessageKind::Delimiter => {
                 if self.trace {
-                    gix_features::trace::trace!(">> DELIM");
+                    gix_trace::trace!(">> DELIM");
                 }
                 encode::write_packet_line(&gix_packetline::PacketLineRef::Delimiter, self.writer.inner_mut())
             }
             MessageKind::ResponseEnd => {
                 if self.trace {
-                    gix_features::trace::trace!(">> RESPONSE_END");
+                    gix_trace::trace!(">> RESPONSE_END");
                 }
                 encode::write_packet_line(&gix_packetline::PacketLineRef::ResponseEnd, self.writer.inner_mut())
             }
             MessageKind::Text(t) => {
-                #[allow(unused_variables, unused_imports)]
                 if self.trace {
-                    use bstr::ByteSlice;
-                    gix_features::trace::trace!(">> {}", t.as_bstr());
+                    gix_trace::trace!(">> {}", bstr::BStr::new(t));
                 }
                 encode::write_text(&gix_packetline::TextRef::from(t), self.writer.inner_mut())
             }

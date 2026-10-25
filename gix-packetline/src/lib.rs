@@ -4,7 +4,7 @@
 //!
 //! ```
 //! # #[cfg(feature = "blocking-io")]
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! use std::io::Write;
 //!
 //! use gix_packetline::{
@@ -42,9 +42,11 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms, unsafe_code)]
+#![deny(missing_docs, unsafe_code)]
 
 use bstr::BStr;
+use gix_error::Result;
+use gix_error::{OptionExt, bail};
 
 ///
 #[cfg(feature = "async-io")]
@@ -162,13 +164,22 @@ impl<'a> PacketLineRef<'a> {
     }
 
     /// Decode the band of this [`slice`](PacketLineRef::as_slice())
-    pub fn decode_band(&self) -> Result<BandRef<'a>, decode::band::Error> {
-        let d = self.as_slice().ok_or(decode::band::Error::NonDataLine)?;
-        Ok(match d[0] {
-            1 => BandRef::Data(&d[1..]),
-            2 => BandRef::Progress(&d[1..]),
-            3 => BandRef::Error(&d[1..]),
-            band => return Err(decode::band::Error::InvalidSideBand { band_id: band }),
+    pub fn decode_band(&self) -> Result<BandRef<'a>> {
+        let d = self
+            .as_slice()
+            .ok_or_raise(|| gix_error::validation("attempt to decode a non-data line into a side-channel band"))?;
+        let (&band_id, d) = d
+            .split_first()
+            .ok_or_raise(|| gix_error::validation("attempt to decode a non-data line into a side-channel band"))?;
+        Ok(match band_id {
+            1 => BandRef::Data(d),
+            2 => BandRef::Progress(d),
+            3 => BandRef::Error(d),
+            band => {
+                bail!(gix_error::validation(format!(
+                    "attempt to decode a non-side channel line or input was malformed: {band}"
+                )));
+            }
         })
     }
 }
@@ -196,7 +207,7 @@ impl<'a> TextRef<'a> {
 
 impl<'a> From<&'a [u8]> for TextRef<'a> {
     fn from(d: &'a [u8]) -> Self {
-        let d = if d[d.len() - 1] == b'\n' { &d[..d.len() - 1] } else { d };
+        let d = d.strip_suffix(b"\n").unwrap_or(d);
         TextRef(d)
     }
 }

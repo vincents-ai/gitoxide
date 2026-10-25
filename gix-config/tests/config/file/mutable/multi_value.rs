@@ -1,17 +1,18 @@
 mod get {
-    use crate::file::{cow_str, mutable::multi_value::init_config};
+    use crate::TestResult;
+    use crate::file::{bstring, mutable::multi_value::init_config};
 
     #[test]
-    fn single_lines() -> crate::Result {
+    fn single_lines() -> TestResult {
         let mut config = init_config();
 
         let value = config.raw_values_mut_by("core", None, "a")?;
-        assert_eq!(&*value.get()?, vec![cow_str("b100"), cow_str("d"), cow_str("f"),]);
+        assert_eq!(value.get()?, vec![bstring("b100"), bstring("d"), bstring("f"),]);
         Ok(())
     }
 
     #[test]
-    fn multi_line() -> crate::Result {
+    fn multi_line() -> TestResult {
         let mut config: gix_config::File = r#"[core]
             a=b\
 "100"
@@ -26,7 +27,7 @@ c
         let mut values = config.raw_values_mut_by("core", None, "a")?;
         assert_eq!(
             &*values.get()?,
-            vec![cow_str("b100"), cow_str("db  c"), cow_str("f   a"),]
+            vec![bstring("b100"), bstring("db  c"), bstring("f   a"),]
         );
 
         values.delete_all();
@@ -34,13 +35,24 @@ c
 
         Ok(())
     }
+
+    #[test]
+    fn value_names_are_case_insensitive() -> TestResult {
+        let mut config: gix_config::File = "[core]\nMixedCase = one\nMIXEDCASE = two".parse()?;
+        assert_eq!(
+            config.raw_values_mut_by("core", None, "mixedcase")?.get()?,
+            vec![bstring("one"), bstring("two")]
+        );
+        Ok(())
+    }
 }
 
 mod access {
+    use crate::TestResult;
     use crate::file::mutable::multi_value::init_config;
 
     #[test]
-    fn non_empty_sizes() -> crate::Result {
+    fn non_empty_sizes() -> TestResult {
         let mut config = init_config();
         assert_eq!(config.raw_values_mut_by("core", None, "a")?.len(), 3);
         assert!(!config.raw_values_mut_by("core", None, "a")?.is_empty());
@@ -49,31 +61,32 @@ mod access {
 }
 
 mod set {
-    use crate::file::{cow_str, mutable::multi_value::init_config};
+    use crate::TestResult;
+    use crate::file::{bstring, mutable::multi_value::init_config};
 
     #[test]
-    fn values_are_escaped() -> crate::Result {
+    fn values_are_escaped() -> TestResult {
         for value in ["a b", " a b", "a b\t", ";c", "#c", "a\nb\n\tc"] {
             let mut config = init_config();
             let mut values = config.raw_values_mut_by("core", None, "a")?;
-            values.set_all(value);
+            values.set_all(value)?;
 
             let config_str = config.to_string();
             let config: gix_config::File = config_str.parse()?;
             assert_eq!(
                 config.raw_values("core.a")?,
-                vec![cow_str(value), cow_str(value), cow_str(value)],
-                "{config_str:?}"
+                vec![bstring(value), bstring(value), bstring(value)],
+                "{config_str}"
             );
         }
         Ok(())
     }
 
     #[test]
-    fn single_at_start() -> crate::Result {
+    fn single_at_start() -> TestResult {
         let mut config = init_config();
         let mut values = config.raw_values_mut_by("core", None, "a")?;
-        values.set_string_at(0, "Hello");
+        values.set_string_at(0, "Hello")?;
         assert_eq!(
             config.to_string(),
             "[core]\n    a = Hello\n    [core]\n        a =d\n        a= f\n"
@@ -82,10 +95,10 @@ mod set {
     }
 
     #[test]
-    fn single_at_end() -> crate::Result {
+    fn single_at_end() -> TestResult {
         let mut config = init_config();
         let mut values = config.raw_values_mut_by("core", None, "a")?;
-        values.set_string_at(2, "Hello");
+        values.set_string_at(2, "Hello")?;
         assert_eq!(
             config.to_string(),
             "[core]\n    a = b\"100\"\n    [core]\n        a =d\n        a= Hello\n"
@@ -94,10 +107,10 @@ mod set {
     }
 
     #[test]
-    fn all() -> crate::Result {
+    fn all() -> TestResult {
         let mut config = init_config();
         let mut values = config.raw_values_mut_by("core", None, "a")?;
-        values.set_all("Hello");
+        values.set_all("Hello")?;
         assert_eq!(
             config.to_string(),
             "[core]\n    a = Hello\n    [core]\n        a= Hello\n        a =Hello\n"
@@ -106,10 +119,10 @@ mod set {
     }
 
     #[test]
-    fn all_empty() -> crate::Result {
+    fn all_empty() -> TestResult {
         let mut config = init_config();
         let mut values = config.raw_values_mut_by("core", None, "a")?;
-        values.set_all("");
+        values.set_all("")?;
         assert_eq!(
             config.to_string(),
             "[core]\n    a = \n    [core]\n        a= \n        a =\n"
@@ -119,10 +132,11 @@ mod set {
 }
 
 mod delete {
+    use crate::TestResult;
     use crate::file::mutable::multi_value::init_config;
 
     #[test]
-    fn single_at_start_and_end() -> crate::Result {
+    fn single_at_start_and_end() -> TestResult {
         let mut config = init_config();
         {
             let mut values = config.raw_values_mut_by("core", None, "a")?;
@@ -140,7 +154,7 @@ mod delete {
     }
 
     #[test]
-    fn all() -> crate::Result {
+    fn all() -> TestResult {
         let mut config = init_config();
         let mut values = config.raw_values_mut_by("core", None, "a")?;
         values.delete_all();
@@ -151,7 +165,7 @@ mod delete {
     }
 }
 
-fn init_config() -> gix_config::File<'static> {
+fn init_config() -> gix_config::File {
     r#"[core]
     a = b"100"
     [core]

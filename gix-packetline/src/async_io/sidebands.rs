@@ -1,15 +1,16 @@
+use gix_error::Result;
 use std::{
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use futures_io::{AsyncBufRead, AsyncRead};
 
 use super::read::StreamingPeekableIter;
-use crate::{decode, read::ProgressAction, BandRef, PacketLineRef, TextRef, U16_HEX_BYTES};
+use crate::{BandRef, PacketLineRef, TextRef, U16_HEX_BYTES, read::ProgressAction};
 
-type ReadLineResult<'a> = Option<std::io::Result<Result<PacketLineRef<'a>, decode::Error>>>;
+type ReadLineResult<'a> = Option<std::io::Result<Result<PacketLineRef<'a>>>>;
 /// An implementor of [`AsyncBufRead`] yielding packet lines on each call to `read_line()`.
 /// It's also possible to hide the underlying packet lines using the [`Read`](AsyncRead) implementation which is useful
 /// if they represent binary data, like the one of a pack file.
@@ -69,7 +70,7 @@ enum State<'a, T> {
 /// However, it's only used when pinned and thus isn't actually sent anywhere, it's a secondary state of the future used after it was Send
 /// to a thread possibly.
 // TODO: Is it possible to declare it as it should be?
-#[allow(unsafe_code, clippy::non_send_fields_in_send_ty)]
+#[expect(unsafe_code)]
 unsafe impl<T> Send for State<'_, T> where T: Send {}
 
 impl<'a, T, F> WithSidebands<'a, T, F>
@@ -134,7 +135,7 @@ where
     /// # Warning
     ///
     /// This skips all sideband handling and may return an unprocessed line with sidebands still contained in it.
-    pub async fn peek_data_line(&mut self) -> Option<std::io::Result<Result<&[u8], decode::Error>>> {
+    pub async fn peek_data_line(&mut self) -> Option<std::io::Result<Result<&[u8]>>> {
         match self.state {
             State::Idle { ref mut parent } => match parent
                 .as_mut()
@@ -161,7 +162,7 @@ where
     /// # Warning
     ///
     /// This skips all sideband handling and may return an unprocessed line with sidebands still contained in it.
-    pub async fn read_data_line(&mut self) -> Option<std::io::Result<Result<PacketLineRef<'_>, decode::Error>>> {
+    pub async fn read_data_line(&mut self) -> Option<std::io::Result<Result<PacketLineRef<'_>>>> {
         match &mut self.state {
             State::Idle { parent: Some(parent) } => {
                 assert_eq!(
@@ -175,7 +176,10 @@ where
     }
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "the manual future is implemented but no public operation currently constructs it, or… maybe it needs specific feature toggles?"
+)]
 pub struct ReadDataLineFuture<'a, 'b, T: AsyncRead, F> {
     parent: &'b mut WithSidebands<'a, T, F>,
     buf: &'b mut Vec<u8>,
@@ -267,7 +271,7 @@ where
                                 // Also: We keep a pointer around which is protected by borrowcheck since it's created
                                 // from a legal mutable reference which is moved into the read_line future - if it was manually
                                 // implemented we would be able to re-obtain it from there.
-                                #[allow(unsafe_code)]
+                                #[expect(unsafe_code)]
                                 let parent = unsafe { &mut *parent };
                                 State::Idle { parent: Some(parent) }
                             };
@@ -308,9 +312,9 @@ where
                                         None => {
                                             return Poll::Ready(Err(io::Error::other(
                                                 "encountered non-data line in a data-line only context",
-                                            )))
+                                            )));
                                         }
-                                    }
+                                    };
                                 }
                             }
                         }

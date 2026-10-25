@@ -11,31 +11,14 @@ pub struct Outcome {
     pub tree_id: gix_hash::ObjectId,
 }
 
-/// The error returned by [`commit::merge_base()`](crate::commit::virtual_merge_base()).
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error(transparent)]
-    MergeTree(#[from] crate::tree::Error),
-    #[error("Failed to write tree for merged merge-base or virtual commit")]
-    WriteObject(gix_object::write::Error),
-    #[error("Failed to decode a commit needed to build a virtual merge-base")]
-    DecodeCommit(#[from] gix_object::decode::Error),
-    #[error(
-        "Conflicts occurred when trying to resolve multiple merge-bases by merging them. This is most certainly a bug."
-    )]
-    VirtualMergeBaseConflict,
-    #[error("Could not find commit to use as basis for a virtual commit")]
-    FindCommit(#[from] gix_object::find::existing_object::Error),
-}
-
 pub(super) mod function {
+    use gix_error::Result;
+    use gix_error::{ResultExt, bail, message};
     use gix_object::FindExt;
 
-    use super::Error;
     use crate::{
         blob::builtin_driver,
-        tree::{treat_as_unresolved, TreatAsUnresolved},
+        tree::{TreatAsUnresolved, treat_as_unresolved},
     };
 
     /// Create a single virtual merge-base by merging `first_commit`, `second_commit` and `others` into one.
@@ -45,7 +28,7 @@ pub(super) mod function {
     /// The parameters `graph`, `diff_resource_cache`, `blob_merge`, `objects`, `abbreviate_hash` and `options` are passed
     /// directly to [`tree()`](crate::tree()) for merging the trees of two merge-bases at a time.
     /// Note that most of `options` are overwritten to match the requirements of a merge-base merge.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn virtual_merge_base<'objects>(
         first_commit: gix_hash::ObjectId,
         second_commit: gix_hash::ObjectId,
@@ -56,7 +39,7 @@ pub(super) mod function {
         objects: &'objects (impl gix_object::FindObjectOrHeader + gix_object::Write),
         abbreviate_hash: &mut dyn FnMut(&gix_hash::oid) -> String,
         mut options: crate::tree::Options,
-    ) -> Result<super::Outcome, crate::commit::Error> {
+    ) -> Result<super::Outcome> {
         let mut merged_commit_id = first_commit;
         others.push(second_commit);
 
@@ -95,13 +78,11 @@ pub(super) mod function {
                 content_merge: treat_as_unresolved::ContentMerge::Markers,
                 tree_merge: treat_as_unresolved::TreeMerge::Undecidable,
             }) {
-                return Err(Error::VirtualMergeBaseConflict.into());
+                bail!(
+                    "Conflicts occurred when trying to resolve multiple merge-bases by merging them. This is most certainly a bug.",
+                );
             }
-            let merged_tree_id = out
-                .tree_merge
-                .tree
-                .write(|tree| objects.write(tree))
-                .map_err(Error::WriteObject)?;
+            let merged_tree_id = out.tree_merge.tree.write(|tree| objects.write(tree))?;
 
             tree_id = Some(merged_tree_id);
             merged_commit_id = create_virtual_commit(objects, merged_commit_id, next_commit_id, merged_tree_id)?;
@@ -129,12 +110,18 @@ pub(super) mod function {
         parent_a: gix_hash::ObjectId,
         parent_b: gix_hash::ObjectId,
         tree_id: gix_hash::ObjectId,
-    ) -> Result<gix_hash::ObjectId, Error> {
+    ) -> Result<gix_hash::ObjectId> {
         let mut buf = Vec::new();
-        let commit_ref = objects.find_commit(&parent_a, &mut buf)?;
-        let mut commit = commit_ref.to_owned()?;
+        let commit_ref = objects
+            .find_commit(&parent_a, &mut buf)
+            .or_raise(|| message("Could not find commit to use as basis for a virtual commit"))?;
+        let mut commit = commit_ref
+            .to_owned()
+            .or_raise(|| message("Failed to decode a commit needed to build a virtual merge-base"))?;
         commit.parents = vec![parent_a, parent_b].into();
         commit.tree = tree_id;
-        objects.write(&commit).map_err(Error::WriteObject)
+        objects
+            .write(&commit)
+            .or_raise(|| message("Failed to write tree for merged merge-base or virtual commit"))
     }
 }

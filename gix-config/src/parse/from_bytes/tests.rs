@@ -1,5 +1,84 @@
 use super::*;
 
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn input_size_is_limited_by_span_representation() {
+    assert!(ensure_supported_input_size(u32::MAX as usize).is_ok());
+    let actual = u32::MAX as usize + 1;
+    let err = ensure_supported_input_size(actual).expect_err("inputs above the span limit must be rejected");
+    assert_eq!(err.line_number(), 1);
+    assert!(err.remaining_data().is_empty());
+    insta::assert_debug_snapshot!(format_args!("{err}"), "oversized input reports the actual byte count and the supported limit", @"Configuration input is 4294967296 bytes large, but at most 4294967295 bytes are supported");
+    assert!(
+        gix_error::Error::from_error(err).is_validation(),
+        "input outside the parser's supported size range is invalid input"
+    );
+}
+
+/// Extend basic types to get their owned versions, without leaking this into production code.
+trait ToOwnedIn {
+    type Owned;
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned;
+}
+
+impl ToOwnedIn for Span {
+    type Owned = bstr::BString;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        self.to_bstring_in(backing)
+    }
+}
+
+impl ToOwnedIn for crate::parse::MaybeDecoded {
+    type Owned = bstr::BString;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        self.value_in(backing).to_owned()
+    }
+}
+
+impl ToOwnedIn for Event {
+    type Owned = crate::parse::tests::util::OwnedEvent;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        crate::parse::tests::util::own_event(&self, backing)
+    }
+}
+
+impl ToOwnedIn for Comment {
+    type Owned = crate::parse::tests::util::OwnedComment;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        crate::parse::tests::util::OwnedComment {
+            tag: self.tag,
+            text: self.text.to_bstring_in(backing),
+        }
+    }
+}
+
+impl ToOwnedIn for crate::parse::section::HeaderData {
+    type Owned = crate::parse::tests::util::OwnedHeader;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        crate::parse::tests::util::own_header(&self, backing)
+    }
+}
+
+impl ToOwnedIn for crate::parse::SectionData {
+    type Owned = crate::parse::tests::util::OwnedSection;
+
+    fn to_owned_in(self, backing: &[u8]) -> Self::Owned {
+        crate::parse::tests::util::OwnedSection {
+            header: self.header.to_owned_in(backing),
+            events: self
+                .events
+                .into_iter()
+                .map(|event| event.to_owned_in(backing))
+                .collect(),
+        }
+    }
+}
+
 trait ParsePeekExt<'a, T> {
     fn parse_peek(self, input: &'a [u8]) -> Result<(&'a [u8], T), ()>;
     fn parse(self, input: &'a [u8]) -> Result<T, ()>;
@@ -16,23 +95,49 @@ where
 
     fn parse(self, input: &'a [u8]) -> Result<T, ()> {
         let (remaining, value) = self.parse_peek(input)?;
-        if remaining.is_empty() {
-            Ok(value)
-        } else {
-            Err(())
-        }
+        if remaining.is_empty() { Ok(value) } else { Err(()) }
+    }
+}
+
+/// Adapt a parser that produces spans into a separate backing allocation for convenient assertions.
+///
+/// [`Self::parse_peek()`] copies `input` into a temporary backing vector, invokes the parser with
+/// that backing and a cursor into it, and resolves the result into its test-only owned equivalent
+/// before dropping the backing. The returned remainder still refers to the original `input`, with
+/// its start determined from the number of bytes consumed in the backing.
+trait ParsePeekWithBackingExt<'a, T> {
+    fn parse_peek(self, input: &'a [u8]) -> Result<(&'a [u8], <T as ToOwnedIn>::Owned), ()>
+    where
+        T: ToOwnedIn;
+}
+
+impl<'a, T, F> ParsePeekWithBackingExt<'a, T> for F
+where
+    F: for<'backing, 'input> FnOnce(&'backing [u8], &'input mut &'backing [u8]) -> Result<T, ()>,
+    T: ToOwnedIn,
+{
+    fn parse_peek(self, input: &'a [u8]) -> Result<(&'a [u8], T::Owned), ()> {
+        let backing = input.to_vec();
+        let mut current = &backing[..];
+        let value = self(&backing, &mut current)?;
+        let consumed = input.len() - current.len();
+        Ok((&input[consumed..], value.to_owned_in(&backing)))
     }
 }
 
 mod config {
     use super::from_bytes;
-    use crate::parse::tests::util::{name_event, newline_event, value_event, whitespace_event};
-    use crate::parse::Event;
+    use crate::parse::tests::util::{
+        OwnedEvent as Event, comment_event, name_event, newline_custom_event, newline_event, own_event, value_event,
+        whitespace_event,
+    };
 
     #[test]
     fn key_value_before_first_section_is_accepted() {
         let mut events = Vec::new();
-        from_bytes(b"a = b\n", &mut |event| events.push(event)).unwrap();
+        let backing = b"a = b\n";
+        from_bytes(backing, &mut |event| events.push(event)).unwrap();
+        let events: Vec<_> = events.iter().map(|event| own_event(event, backing)).collect();
         assert_eq!(
             events,
             vec![
@@ -46,16 +151,34 @@ mod config {
             "Git accepts this and reports `a=b`, as git_parse_source() parses alphabetic keys even before any section"
         );
     }
+
+    #[test]
+    fn comments_do_not_consume_the_carriage_return_of_crlf() {
+        let mut events = Vec::new();
+        let backing = b"; comment\r\n";
+        from_bytes(backing, &mut |event| events.push(event)).expect("valid comment");
+        let events: Vec<_> = events.iter().map(|event| own_event(event, backing)).collect();
+        assert_eq!(
+            events,
+            vec![comment_event(';', " comment"), newline_custom_event("\r\n")],
+            "the complete CRLF sequence must belong to the newline event"
+        );
+
+        let mut events = Vec::new();
+        let backing = b"; comment\r";
+        from_bytes(backing, &mut |event| events.push(event)).expect("a bare carriage return is comment text");
+        let events: Vec<_> = events.iter().map(|event| own_event(event, backing)).collect();
+        assert_eq!(
+            events,
+            vec![comment_event(';', " comment\r")],
+            "a carriage return without a following line feed must remain part of the comment"
+        );
+    }
 }
 
 mod section_headers {
-    use std::borrow::Cow;
-
-    use super::{section_header, ParsePeekExt};
-    use crate::parse::{
-        section,
-        tests::util::{fully_consumed, section_header as parsed_section_header},
-    };
+    use super::{ParsePeekWithBackingExt, section_header};
+    use crate::parse::tests::util::{fully_consumed, section_header as parsed_section_header};
 
     #[test]
     fn no_subsection() {
@@ -82,10 +205,10 @@ mod section_headers {
     fn empty_section_name_with_quoted_subsection_is_accepted() {
         assert_eq!(
             section_header.parse_peek(br#"[ "core"]"#).unwrap(),
-            fully_consumed(section::Header {
-                name: section::Name(Cow::Borrowed("".into())),
-                separator: Some(Cow::Borrowed(" ".into())),
-                subsection_name: Some(Cow::Borrowed("core".into())),
+            fully_consumed(crate::parse::tests::util::OwnedHeader {
+                name: "".into(),
+                separator: Some(" ".into()),
+                subsection_name: Some("core".into()),
             }),
             "Git accepts this as an empty section name with `core` as subsection, yielding keys like `.core.bare`; gix does this too for compatibility"
         );
@@ -210,27 +333,25 @@ mod section_headers {
 }
 
 mod sub_section {
-    use std::borrow::Cow;
+    use bstr::ByteSlice;
 
-    use super::{quoted_sub_section, ParsePeekExt};
+    use super::{ParsePeekWithBackingExt, quoted_sub_section};
 
     #[test]
-    fn zero_copy_simple() {
+    fn simple() {
         let actual = quoted_sub_section.parse_peek(br#"name""#).unwrap().1;
-        assert_eq!(actual.as_ref(), "name");
-        assert!(matches!(actual, Cow::Borrowed(_)));
+        assert_eq!(actual.as_bstr(), "name");
     }
 
     #[test]
-    fn escapes_need_allocation() {
+    fn escapes_are_unescaped() {
         let actual = quoted_sub_section.parse_peek(br#"\x\t\n\0\\\"""#).unwrap().1;
-        assert_eq!(actual.as_ref(), r#"xtn0\""#);
-        assert!(matches!(actual, Cow::Owned(_)));
+        assert_eq!(actual.as_bstr(), r#"xtn0\""#);
     }
 }
 
 mod config_name {
-    use super::{config_name, ParsePeekExt};
+    use super::{ParsePeekExt, config_name};
     use crate::parse::tests::util::fully_consumed;
 
     #[test]
@@ -258,33 +379,36 @@ mod config_name {
 
 mod section {
     use crate::parse::{
+        Event as RawEvent,
         error::ParseNode,
         tests::util::{
-            comment_event, fully_consumed, name_event, newline_custom_event, newline_event,
-            section_header as parsed_section_header, value_done_event, value_event, value_not_done_event,
-            whitespace_event,
+            OwnedEvent as Event, OwnedSection as SectionData, comment_event, fully_consumed, name_event,
+            newline_custom_event, newline_event, own_event, own_header, section_header as parsed_section_header,
+            value_done_event, value_event, value_not_done_event, whitespace_event,
         },
-        Event, Section,
     };
 
-    fn section<'a>(mut i: &'a [u8], node: &mut ParseNode) -> Result<(&'a [u8], Section<'a>), ()> {
+    fn section<'a>(input: &'a [u8], node: &mut ParseNode) -> Result<(&'a [u8], SectionData), ()> {
+        let backing = input.to_vec();
+        let mut current = &backing[..];
         let mut header = None;
         let mut events = Vec::new();
-        super::section(&mut i, node, &mut |e| match &header {
+        super::section(&backing, &mut current, node, &mut |e| match &header {
             None => {
                 header = Some(e);
             }
             Some(_) => events.push(e),
         })
         .map(|_| {
+            let consumed = input.len() - current.len();
             (
-                i,
-                Section {
+                &input[consumed..],
+                SectionData {
                     header: match header.expect("header set") {
-                        Event::SectionHeader(header) => header,
+                        RawEvent::SectionHeader(header) => own_header(&header, &backing),
                         _ => unreachable!("unexpected"),
                     },
-                    events,
+                    events: events.iter().map(|event| own_event(event, &backing)).collect(),
                 },
             )
         })
@@ -295,7 +419,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[a] k = \r\n", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("a", None),
                 events: vec![
                     whitespace_event(" "),
@@ -315,7 +439,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[a] k = v\r\n", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("a", None),
                 events: vec![
                     whitespace_event(" "),
@@ -330,7 +454,7 @@ mod section {
         );
         assert_eq!(
             section(b"[a] k = \r\n", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("a", None),
                 events: vec![
                     whitespace_event(" "),
@@ -350,7 +474,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[test]", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("test", None),
                 events: Default::default()
             }),
@@ -366,7 +490,7 @@ mod section {
             d = "lol""#;
         assert_eq!(
             section(section_data, &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("hello", None),
                 events: vec![
                     newline_event(),
@@ -398,7 +522,7 @@ mod section {
         let section_data = b"[a] k=";
         assert_eq!(
             section(section_data, &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("a", None),
                 events: vec![
                     whitespace_event(" "),
@@ -412,7 +536,7 @@ mod section {
         let section_data = b"[a] k=\n";
         assert_eq!(
             section(section_data, &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("a", None),
                 events: vec![
                     whitespace_event(" "),
@@ -434,7 +558,7 @@ mod section {
             d = "lol""#;
         assert_eq!(
             section(section_data, &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("hello", None),
                 events: vec![
                     newline_event(),
@@ -466,7 +590,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[hello] c", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("hello", None),
                 events: vec![whitespace_event(" "), name_event("c"), value_event("")]
             })
@@ -474,7 +598,7 @@ mod section {
 
         assert_eq!(
             section(b"[hello] c\nd", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("hello", None),
                 events: vec![
                     whitespace_event(" "),
@@ -498,7 +622,7 @@ mod section {
             c = d"#;
         assert_eq!(
             section(section_data, &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("hello", None),
                 events: vec![
                     whitespace_event(" "),
@@ -536,7 +660,7 @@ mod section {
         // This test is absolute hell. Good luck if this fails.
         assert_eq!(
             section(b"[section] a = 1    \"\\\"\\\na ; e \"\\\"\\\nd # \"b\t ; c", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("section", None),
                 events: vec![
                     whitespace_event(" "),
@@ -561,7 +685,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[section \"a\"] b =\"\\\n;\";a", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("section", (" ", "a")),
                 events: vec![
                     whitespace_event(" "),
@@ -582,7 +706,7 @@ mod section {
         let mut node = ParseNode::SectionHeader;
         assert_eq!(
             section(b"[s]hello             #world", &mut node).unwrap(),
-            fully_consumed(Section {
+            fully_consumed(SectionData {
                 header: parsed_section_header("s", None),
                 events: vec![
                     name_event("hello"),
@@ -598,13 +722,20 @@ mod section {
 mod value_continuation {
     use bstr::ByteSlice;
 
-    use crate::parse::{
-        tests::util::{newline_custom_event, newline_event, value_done_event, value_not_done_event},
-        Event,
+    use crate::parse::tests::util::{
+        OwnedEvent, newline_custom_event, newline_event, own_event, value_done_event, value_not_done_event,
+        whitespace_event,
     };
 
-    pub fn value<'a>(mut i: &'a [u8], events: &mut Vec<Event<'a>>) -> Result<(&'a [u8], ()), ()> {
-        super::value(&mut i, &mut |e| events.push(e)).map(|_| (i, ()))
+    pub fn value<'a>(input: &'a [u8], events: &mut Vec<OwnedEvent>) -> Result<(&'a [u8], ()), ()> {
+        let backing = input.to_vec();
+        let mut current = &backing[..];
+        let mut parsed = Vec::new();
+        super::value(&backing, &mut current, &mut |e| parsed.push(e)).map(|_| {
+            let consumed = input.len() - current.len();
+            events.extend(parsed.iter().map(|event| own_event(event, &backing)));
+            (&input[consumed..], ())
+        })
     }
 
     #[test]
@@ -649,6 +780,64 @@ mod value_continuation {
         assert!(
             value(b"hello\\\r\r\n        world", &mut events).is_err(),
             r"\r must be followed by \n"
+        );
+    }
+
+    #[test]
+    fn indentation_of_the_line_a_value_starts_on_is_insignificant() {
+        for (input, newline, whitespace) in [
+            (&b"\\\n        world"[..], newline_event(), "        "),
+            (&b"\\\r\n        world"[..], newline_custom_event("\r\n"), "        "),
+            (&b"\\\n\r \tworld"[..], newline_event(), "\r \t"),
+        ] {
+            let mut events = Vec::new();
+            assert_eq!(value(input, &mut events).unwrap().0, b"");
+            assert_eq!(
+                events,
+                vec![
+                    value_not_done_event(""),
+                    newline,
+                    whitespace_event(whitespace),
+                    value_done_event("world")
+                ],
+                "Git discards its locale-independent whitespace for as long as the value it accumulated is empty, \
+                 so a value that only starts after a continuation begins at `world` for {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indentation_is_insignificant_until_the_value_has_content() {
+        let mut events = Vec::new();
+        assert_eq!(value(b"\\\n  \\\n  world", &mut events).unwrap().0, b"");
+        assert_eq!(
+            events,
+            vec![
+                value_not_done_event(""),
+                newline_event(),
+                whitespace_event("  "),
+                value_not_done_event(""),
+                newline_event(),
+                whitespace_event("  "),
+                value_done_event("world")
+            ],
+            "a continuation line that is entirely whitespace keeps the value empty, \
+             so the next line's indentation is insignificant as well"
+        );
+
+        let mut events = Vec::new();
+        assert_eq!(value(b"\\\n  hello\\\n  world", &mut events).unwrap().0, b"");
+        assert_eq!(
+            events,
+            vec![
+                value_not_done_event(""),
+                newline_event(),
+                whitespace_event("  "),
+                value_not_done_event("hello"),
+                newline_event(),
+                value_done_event("  world")
+            ],
+            "once the value has content, indentation is part of it, just like interior whitespace"
         );
     }
 
@@ -826,7 +1015,6 @@ mod value_no_continuation {
     }
 
     #[test]
-    #[allow(clippy::needless_raw_string_hashes)]
     fn trans_escaped_comment_marker_not_consumed() {
         let mut events = Vec::new();
         assert_eq!(value(br##"hello"#"world; a"##, &mut events).unwrap().0, b"; a");
@@ -870,12 +1058,18 @@ mod value_no_continuation {
 mod key_value_pair {
     use crate::parse::{
         error::ParseNode,
-        tests::util::{name_event, value_event, whitespace_event},
-        Event,
+        tests::util::{OwnedEvent as Event, name_event, own_event, value_event, whitespace_event},
     };
 
-    fn key_value<'a>(mut i: &'a [u8], node: &mut ParseNode, events: &mut Vec<Event<'a>>) -> Result<(&'a [u8], ()), ()> {
-        super::key_value_pair(&mut i, node, &mut |e| events.push(e)).map(|_| (i, ()))
+    fn key_value<'a>(input: &'a [u8], node: &mut ParseNode, events: &mut Vec<Event>) -> Result<(&'a [u8], ()), ()> {
+        let backing = input.to_vec();
+        let mut current = &backing[..];
+        let mut parsed = Vec::new();
+        super::key_value_pair(&backing, &mut current, node, &mut |e| parsed.push(e)).map(|_| {
+            let consumed = input.len() - current.len();
+            events.extend(parsed.iter().map(|event| own_event(event, &backing)));
+            (&input[consumed..], ())
+        })
     }
 
     #[test]
@@ -934,15 +1128,18 @@ mod key_value_pair {
 
 mod value {
     use super::value;
-    use crate::parse::{
-        tests::util::{newline_custom_event, newline_event, value_done_event, value_event, value_not_done_event},
-        Event,
+    use crate::parse::tests::util::{
+        OwnedEvent, newline_custom_event, newline_event, own_event, value_done_event, value_event, value_not_done_event,
     };
 
-    fn parse(mut input: &[u8]) -> Result<(&[u8], Vec<Event<'_>>), ()> {
+    fn parse(input: &[u8]) -> Result<(&[u8], Vec<OwnedEvent>), ()> {
+        let backing = input.to_vec();
+        let mut current = &backing[..];
         let mut events = Vec::new();
-        value(&mut input, &mut |event| events.push(event))?;
-        Ok((input, events))
+        value(&backing, &mut current, &mut |event| events.push(event))?;
+        let consumed = input.len() - current.len();
+        let events = events.iter().map(|event| own_event(event, &backing)).collect();
+        Ok((&input[consumed..], events))
     }
 
     #[test]
@@ -953,16 +1150,28 @@ mod value {
     }
 
     #[test]
-    fn plain_value_runs_until_eof_and_trims_trailing_whitespace() {
-        let (remaining, events) = parse(b"hello  \t").unwrap();
-        assert_eq!(remaining, b"  \t");
+    fn trailing_git_whitespace_is_trimmed_but_other_ascii_whitespace_is_not() {
+        let (remaining, events) = parse(b"hello  \t\r").unwrap();
+        assert_eq!(remaining, b"  \t\r");
         assert_eq!(events, vec![value_event("hello")]);
+
+        let (remaining, events) = parse(b"hello\x0b\x0c").unwrap();
+        assert_eq!(remaining, b"");
+        assert_eq!(
+            events,
+            vec![value_event("hello\x0b\x0c")],
+            "Git treats vertical tab and form feed as value content, not whitespace"
+        );
     }
 
     #[test]
     fn newline_without_backslash_is_not_a_continuation() {
         let (remaining, events) = parse(b"config\n  value").unwrap();
         assert_eq!(remaining, b"\n  value");
+        assert_eq!(events, vec![value_event("config")]);
+
+        let (remaining, events) = parse(b"config\r\n  value").unwrap();
+        assert_eq!(remaining, b"\r\n  value");
         assert_eq!(events, vec![value_event("config")]);
     }
 
@@ -1058,6 +1267,39 @@ mod value {
     }
 
     #[test]
+    fn continuation_into_an_empty_line_completes_the_value() {
+        let (remaining, events) = parse(b"hello\\\n").unwrap();
+        assert_eq!(
+            events,
+            vec![value_not_done_event("hello"), newline_event(), value_done_event("")]
+        );
+        assert_eq!(
+            remaining, b"",
+            "the newline belongs to the continuation value, leaving nothing else"
+        );
+
+        let (remaining, events) = parse(b"hello\\\n\nb = c").unwrap();
+        assert_eq!(
+            events,
+            vec![value_not_done_event("hello"), newline_event(), value_done_event("")]
+        );
+        assert_eq!(
+            remaining, b"\nb = c",
+            "the first newline belongs to the value, the second is left alone"
+        );
+
+        let (remaining, events) = parse(b"hello\\\n; comment").unwrap();
+        assert_eq!(
+            events,
+            vec![value_not_done_event("hello"), newline_event(), value_done_event("")]
+        );
+        assert_eq!(
+            remaining, b"; comment",
+            "everything beyond the newline is in the remainder, no matter the newlines"
+        );
+    }
+
+    #[test]
     fn unsupported_escapes_are_rejected() {
         assert!(parse(br"\a").is_err());
         assert!(parse(br"\x").is_err());
@@ -1071,7 +1313,7 @@ mod value {
 }
 
 mod comment {
-    use super::{comment, ParsePeekExt};
+    use super::{ParsePeekWithBackingExt, comment};
     use crate::parse::tests::util::{comment as parsed_comment, fully_consumed};
 
     #[test]

@@ -1,14 +1,15 @@
 use crate::util::{named_repo, named_subrepo_opts};
+use gix_testtools::TestResult;
 
 #[cfg(all(feature = "blob-diff", feature = "revision"))]
 mod diff;
 
-fn worktree_repo() -> Result<gix::Repository, gix::open::Error> {
+fn worktree_repo() -> std::result::Result<gix::Repository, gix_error::Error> {
     named_subrepo_opts("make_worktree_repo.sh", "repo", gix::open::Options::isolated())
 }
 
 #[test]
-fn find_entry() -> crate::Result {
+fn find_entry() -> TestResult {
     let repo = named_repo("make_basic_repo.sh")?;
     let tree = repo.head_commit()?.tree()?;
     assert_eq!(tree.find_entry("this").expect("present").filename(), "this");
@@ -18,7 +19,7 @@ fn find_entry() -> crate::Result {
 }
 
 #[test]
-fn lookup_entry_by_path() -> crate::Result {
+fn lookup_entry_by_path() -> TestResult {
     let repo = worktree_repo()?;
     let tree = repo.head_commit()?.tree()?;
     assert_eq!(tree.lookup_entry_by_path("dir/c")?.expect("present").filename(), "c");
@@ -26,34 +27,40 @@ fn lookup_entry_by_path() -> crate::Result {
 }
 
 #[test]
-fn decode_uses_the_tree_id_hash_kind() -> crate::Result {
+fn decode_uses_the_tree_id_hash_kind() -> TestResult {
     use gix::bstr::ByteSlice;
 
     let repo = named_repo("make_basic_repo.sh")?;
-    assert_eq!(repo.object_hash(), gix::hash::Kind::Sha1, "fixture assumption");
+    let other_hash = match repo.object_hash() {
+        gix::hash::Kind::Sha1 => gix::hash::Kind::Sha256,
+        gix::hash::Kind::Sha256 => gix::hash::Kind::Sha1,
+        _ => unimplemented!(),
+    };
 
-    let bogus_sha256_entry_id = gix::hash::Kind::Sha256.null();
+    let bogus_other_hash_entry_id = other_hash.null();
     let mut data = b"100644 file\0".to_vec();
-    data.extend_from_slice(bogus_sha256_entry_id.as_bytes());
+    data.extend_from_slice(bogus_other_hash_entry_id.as_bytes());
 
-    let bogux_sha256_tree_id = gix::hash::Kind::Sha256.empty_tree();
-    let tree = gix::Tree::from_data(bogux_sha256_tree_id, data, &repo);
+    let bogus_other_hash_tree_id = other_hash.empty_tree();
+    let tree = gix::Tree::from_data(bogus_other_hash_tree_id, data, &repo);
     let decoded = tree.decode()?;
 
     assert_eq!(decoded.entries.len(), 1);
     assert_eq!(decoded.entries[0].filename, b"file".as_bstr());
-    assert_eq!(decoded.entries[0].oid, bogus_sha256_entry_id.as_ref());
+    assert_eq!(decoded.entries[0].oid, bogus_other_hash_entry_id.as_ref());
     assert_eq!(
-        bogus_sha256_entry_id.kind(),
-        bogux_sha256_tree_id.kind(),
+        bogus_other_hash_entry_id.kind(),
+        bogus_other_hash_tree_id.kind(),
         "both kinds are expected to match, the `repo.object_hash()` doesn't matter here"
     );
     Ok(())
 }
 
 mod peel_to_entry {
+    use gix_testtools::TestResult;
+
     #[test]
-    fn top_level_file_keeps_the_current_tree() -> crate::Result {
+    fn top_level_file_keeps_the_current_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let root_id = tree.id();
@@ -66,7 +73,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn nested_file_moves_to_the_last_seen_tree() -> crate::Result {
+    fn nested_file_moves_to_the_last_seen_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let dir_id = tree.lookup_entry(["dir"])?.expect("tree entry").object_id();
@@ -79,7 +86,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn tree_leaf_moves_to_the_returned_tree() -> crate::Result {
+    fn tree_leaf_moves_to_the_returned_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let dir_id = tree.lookup_entry(["dir"])?.expect("tree entry").object_id();
@@ -97,7 +104,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn missing_top_level_entry_keeps_the_current_tree() -> crate::Result {
+    fn missing_top_level_entry_keeps_the_current_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let root_id = tree.id();
@@ -110,7 +117,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn missing_nested_entry_moves_to_the_last_seen_tree() -> crate::Result {
+    fn missing_nested_entry_moves_to_the_last_seen_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let dir_id = tree.lookup_entry(["dir"])?.expect("tree entry").object_id();
@@ -123,7 +130,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn path_continuing_past_a_top_level_file_keeps_the_current_tree() -> crate::Result {
+    fn path_continuing_past_a_top_level_file_keeps_the_current_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let root_id = tree.id();
@@ -141,7 +148,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn path_continuing_past_a_nested_file_keeps_the_last_seen_tree() -> crate::Result {
+    fn path_continuing_past_a_nested_file_keeps_the_last_seen_tree() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let dir_id = tree.lookup_entry(["dir"])?.expect("tree entry").object_id();
@@ -159,7 +166,7 @@ mod peel_to_entry {
     }
 
     #[test]
-    fn by_path_has_the_same_tree_leaf_behavior() -> crate::Result {
+    fn by_path_has_the_same_tree_leaf_behavior() -> TestResult {
         let repo = super::worktree_repo()?;
         let mut tree = repo.head_commit()?.tree()?;
         let dir_id = tree.lookup_entry(["dir"])?.expect("tree entry").object_id();

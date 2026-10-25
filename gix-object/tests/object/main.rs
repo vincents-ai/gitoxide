@@ -1,30 +1,32 @@
-use std::{collections::HashMap, path::PathBuf, sync::atomic::AtomicBool};
+use std::{path::PathBuf, sync::atomic::AtomicBool};
 
 use gix_hash::ObjectId;
-use gix_object::WriteTo;
+use gix_object::{Exists, Find, FindHeader, Write, WriteTo};
 
 mod commit;
 mod encode;
 mod object_ref;
+mod signature_format;
 mod tag;
 mod tree;
 
 #[test]
-fn compute_hash() {
+fn compute_hash() -> gix_testtools::TestResult {
     for hk in gix_hash::Kind::all() {
         assert_eq!(
-            gix_object::compute_hash(*hk, gix_object::Kind::Blob, &[]).expect("empty hash doesn’t collide"),
+            gix_object::compute_hash(*hk, gix_object::Kind::Blob, &[])?,
             gix_hash::ObjectId::empty_blob(*hk)
         );
         assert_eq!(
-            gix_object::compute_hash(*hk, gix_object::Kind::Tree, &[]).expect("empty hash doesn’t collide"),
+            gix_object::compute_hash(*hk, gix_object::Kind::Tree, &[])?,
             gix_hash::ObjectId::empty_tree(*hk)
         );
     }
+    Ok(())
 }
 
 #[test]
-fn compute_stream_hash() {
+fn compute_stream_hash() -> gix_testtools::TestResult {
     for hk in gix_hash::Kind::all() {
         assert_eq!(
             gix_object::compute_stream_hash(
@@ -32,10 +34,9 @@ fn compute_stream_hash() {
                 gix_object::Kind::Blob,
                 &mut &[][..],
                 0,
-                &mut gix_features::progress::Discard,
+                &mut gix_utils::progress::Discard,
                 &AtomicBool::default()
-            )
-            .expect("in-memory works"),
+            )?,
             gix_hash::ObjectId::empty_blob(*hk)
         );
         assert_eq!(
@@ -44,13 +45,99 @@ fn compute_stream_hash() {
                 gix_object::Kind::Tree,
                 &mut &[][..],
                 0,
-                &mut gix_features::progress::Discard,
+                &mut gix_utils::progress::Discard,
                 &AtomicBool::default()
-            )
-            .expect("in-memory works"),
+            )?,
             gix_hash::ObjectId::empty_tree(*hk)
         );
     }
+    Ok(())
+}
+
+#[test]
+fn never_writes_to_nowhere_and_finds_nothing() -> gix_testtools::TestResult {
+    let db = gix_object::find::Never;
+    let data = b"content";
+    let expected = gix_object::compute_hash(gix_hash::Kind::default(), gix_object::Kind::Blob, data)?;
+
+    assert_eq!(
+        db.write_buf(gix_object::Kind::Blob, data)?,
+        expected,
+        "discarded buffer writes still return the computed object id"
+    );
+    assert_eq!(
+        db.write_stream(gix_object::Kind::Blob, data.len() as u64, &mut data.as_slice())?,
+        expected,
+        "discarded stream writes still return the computed object id"
+    );
+    assert_eq!(
+        db.write_buf_with_known_id(gix_object::Kind::Blob, data, expected)?,
+        expected,
+        "known-id buffer writes preserve the caller-provided id"
+    );
+    assert_eq!(
+        db.write_stream_with_known_id(
+            gix_object::Kind::Blob,
+            data.len() as u64,
+            &mut data.as_slice(),
+            expected
+        )?,
+        expected,
+        "known-id stream writes preserve the caller-provided id"
+    );
+
+    let mut buf = Vec::new();
+    assert!(
+        db.try_find(&expected, &mut buf)?.is_none(),
+        "discarded writes must not become readable"
+    );
+    assert!(
+        db.try_header(&expected)?.is_none(),
+        "discarded writes must not make headers readable"
+    );
+    assert!(!db.exists(&expected), "discarded writes must not exist");
+
+    Ok(())
+}
+
+#[test]
+fn never_fail_always_panics_on_all_object_access() {
+    let assert_panics = |operation: fn(gix_object::find::PanicAlways, ObjectId)| {
+        assert!(
+            std::panic::catch_unwind(|| {
+                operation(
+                    gix_object::find::Never::panic_on_access(),
+                    ObjectId::empty_blob(gix_hash::Kind::default()),
+                );
+            })
+            .is_err(),
+            "every object-access operation must panic"
+        );
+    };
+    assert_panics(|db, blob_id| {
+        let _ = db.try_find(&blob_id, &mut Vec::new());
+    });
+    assert_panics(|db, blob_id| {
+        let _ = db.try_header(&blob_id);
+    });
+    assert_panics(|db, blob_id| {
+        db.exists(&blob_id);
+    });
+    assert_panics(|db, _| {
+        let _ = db.write(&gix_object::Tree::default());
+    });
+    assert_panics(|db, _| {
+        let _ = db.write_buf(gix_object::Kind::Blob, b"");
+    });
+    assert_panics(|db, blob_id| {
+        let _ = db.write_buf_with_known_id(gix_object::Kind::Blob, b"", blob_id);
+    });
+    assert_panics(|db, _| {
+        let _ = db.write_stream(gix_object::Kind::Blob, 0, &mut std::io::empty());
+    });
+    assert_panics(|db, blob_id| {
+        let _ = db.write_stream_with_known_id(gix_object::Kind::Blob, 0, &mut std::io::empty(), blob_id);
+    });
 }
 
 use gix_testtools::Result;
@@ -73,7 +160,7 @@ pub fn fixture(path: &str) -> PathBuf {
 }
 
 pub fn fixture_hash_kind() -> gix_hash::Kind {
-    gix_testtools::hash_kind_from_env().unwrap_or_default()
+    gix_testtools::object_hash()
 }
 
 fn fixture_bytes(path: &str) -> Vec<u8> {
@@ -200,39 +287,8 @@ pub fn generated_tree_root_id() -> Result<ObjectId> {
     )?)
 }
 
-/// Normalize rendered tree snapshots so one inline `insta` expectation can be reused for
-/// SHA-1 and SHA-256 fixtures.
-///
-/// Every object id whose hex length matches one of [`gix_hash::Kind::all()`] is rewritten to a
-/// stable `Oid(<n>)` placeholder in first-seen order while the tree rendering itself remains
-/// unchanged.
 pub fn normalize_tree_snapshot(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut seen = HashMap::<&str, usize>::new();
-    let mut next_id = 1usize;
-    let mut cursor = input;
-
-    while !cursor.is_empty() {
-        let hex_len = cursor.bytes().take_while(u8::is_ascii_hexdigit).count();
-        if hex_len >= 40 && gix_hash::Kind::all().iter().any(|kind| kind.len_in_hex() == hex_len) {
-            let oid = &cursor[..hex_len];
-            let normalized = *seen.entry(oid).or_insert_with(|| {
-                let current = next_id;
-                next_id += 1;
-                current
-            });
-            out.push_str("Oid(");
-            out.push_str(&normalized.to_string());
-            out.push(')');
-            cursor = &cursor[hex_len..];
-            continue;
-        }
-
-        let ch = cursor.chars().next().expect("not empty");
-        out.push(ch);
-        cursor = &cursor[ch.len_utf8()..];
-    }
-    out
+    gix_testtools::normalize_hashes(input).0
 }
 
 #[test]

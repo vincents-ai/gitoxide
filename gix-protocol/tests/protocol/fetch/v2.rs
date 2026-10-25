@@ -1,15 +1,17 @@
+use crate::TestResult;
 use bstr::ByteSlice;
-use gix_features::progress;
 use gix_protocol::handshake;
 use gix_transport::Protocol;
+use gix_utils::progress;
 
 use crate::fetch::{
-    _impl::FetchConnection, helper_unused, oid, transport, CloneDelegate, CloneRefInWantDelegate, Error,
-    LsRemoteDelegate,
+    _impl::FetchConnection, CloneDelegate, CloneRefInWantDelegate, LsRemoteDelegate, helper_unused, oid, transport,
 };
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn clone_abort_prep() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn clone_abort_prep() -> TestResult {
     let out = Vec::new();
     let mut dlg = CloneDelegate {
         abort_with: Some(std::io::Error::other("hello world")),
@@ -39,6 +41,7 @@ async fn clone_abort_prep() -> crate::Result {
         transport.into_inner().1.as_bstr(),
         format!(
             "002fgit-upload-pack does/not/matter\0\0version=2\00014command=ls-refs
+0017object-format=sha1
 0014agent={}
 0001000csymrefs
 0009peel
@@ -48,18 +51,18 @@ async fn clone_abort_prep() -> crate::Result {
         .as_bytes()
         .as_bstr()
     );
-    match err {
-        Error::Io(err) => {
-            assert_eq!(err.kind(), std::io::ErrorKind::Other);
-            assert_eq!(err.get_ref().expect("other error").to_string(), "hello world");
-        }
-        _ => panic!("should not have another error here"),
-    }
+    let err = err
+        .downcast_any_ref::<std::io::Error>()
+        .expect("delegate I/O error is retained");
+    assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    insta::assert_debug_snapshot!(err.get_ref().expect("other error"), "clone abort prep", @r#""hello world""#);
     Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn ls_remote() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn ls_remote() -> TestResult {
     let out = Vec::new();
     let mut delegate = LsRemoteDelegate::default();
     let mut transport = transport(
@@ -99,6 +102,7 @@ async fn ls_remote() -> crate::Result {
         transport.into_inner().1.as_bstr(),
         format!(
             "0044git-upload-pack does/not/matter\0\0version=2\0value-only\0key=value\00014command=ls-refs
+0017object-format=sha1
 0014agent={}
 0001000csymrefs
 0009peel
@@ -112,8 +116,10 @@ async fn ls_remote() -> crate::Result {
     Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn ls_remote_abort_in_prep_ls_refs() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn ls_remote_abort_in_prep_ls_refs() -> TestResult {
     let out = Vec::new();
     let mut delegate = LsRemoteDelegate {
         abort_with: Some(std::io::Error::other("hello world")),
@@ -142,18 +148,18 @@ async fn ls_remote_abort_in_prep_ls_refs() -> crate::Result {
         transport.into_inner().1.as_bstr(),
         b"0044git-upload-pack does/not/matter\x00\x00version=2\x00value-only\x00key=value\x000000".as_bstr()
     );
-    match err {
-        Error::Io(err) => {
-            assert_eq!(err.kind(), std::io::ErrorKind::Other);
-            assert_eq!(err.get_ref().expect("other error").to_string(), "hello world");
-        }
-        err => panic!("should not have another error here, got: {err}"),
-    }
+    let err = err
+        .downcast_any_ref::<std::io::Error>()
+        .expect("delegate I/O error is retained");
+    assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    insta::assert_debug_snapshot!(err.get_ref().expect("other error"), "ls remote abort in prep ls refs", @r#""hello world""#);
     Ok(())
 }
 
-#[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-async fn ref_in_want() -> crate::Result {
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn ref_in_want() -> TestResult {
     let out = Vec::new();
     let mut delegate = CloneRefInWantDelegate {
         want_refs: vec!["refs/heads/main".into()],
@@ -173,7 +179,7 @@ async fn ref_in_want() -> crate::Result {
         helper_unused,
         progress::Discard,
         FetchConnection::TerminateOnSuccessfulCompletion,
-        "agent",
+        agent,
         false,
     )
     .await?;
@@ -191,6 +197,7 @@ async fn ref_in_want() -> crate::Result {
         transport.into_inner().1.as_bstr(),
         format!(
             "002fgit-upload-pack does/not/matter\0\0version=2\00012command=fetch
+0017object-format=sha1
 0014agent={}
 0001000ethin-pack
 000eofs-delta
@@ -201,6 +208,65 @@ async fn ref_in_want() -> crate::Result {
         )
         .as_bytes()
         .as_bstr()
+    );
+
+    Ok(())
+}
+
+/// Like `ref_in_want`, but the server advertises `object-format=sha256`.
+#[cfg(feature = "sha256")]
+#[crate::bisync::bisync]
+#[cfg_attr(feature = "blocking-client", test)]
+#[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+async fn ref_in_want_sha256() -> TestResult {
+    let out = Vec::new();
+    let mut delegate = CloneRefInWantDelegate {
+        want_refs: vec!["refs/heads/main".into()],
+        ..CloneRefInWantDelegate::default()
+    };
+    let mut transport = transport(
+        out,
+        "v2/clone-ref-in-want-sha256.response",
+        Protocol::V2,
+        gix_transport::client::git::ConnectMode::Daemon,
+    );
+
+    let agent = "agent";
+    crate::fetch(
+        &mut transport,
+        &mut delegate,
+        helper_unused,
+        progress::Discard,
+        FetchConnection::TerminateOnSuccessfulCompletion,
+        agent,
+        false,
+    )
+    .await?;
+
+    assert_eq!(
+        delegate.wanted_refs,
+        vec![handshake::Ref::Direct {
+            full_ref_name: "refs/heads/main".into(),
+            object: oid("e36613f63a483f296d306a8c41dc6ad8ecb2f178ab8d0e9c82a130917ae53e65"),
+        }],
+        "the SHA-256 wanted-ref is parsed as such"
+    );
+    assert_eq!(
+        transport.into_inner().1.as_bstr(),
+        format!(
+            "002fgit-upload-pack does/not/matter\0\0version=2\00012command=fetch
+0019object-format=sha256
+0014agent={}
+0001000ethin-pack
+000eofs-delta
+001dwant-ref refs/heads/main
+0009done
+00000000",
+            gix_protocol::agent(agent)
+        )
+        .as_bytes()
+        .as_bstr(),
+        "the fetch command echoes the server's SHA-256 object format"
     );
 
     Ok(())

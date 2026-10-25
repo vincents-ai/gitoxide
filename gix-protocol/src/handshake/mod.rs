@@ -71,13 +71,11 @@ pub(crate) mod hero {
 
     #[cfg(feature = "fetch")]
     mod fetch {
-        #[cfg(feature = "async-client")]
-        use crate::transport::client::async_io;
-        #[cfg(feature = "blocking-client")]
-        use crate::transport::client::blocking_io;
-        use crate::{fetch::RefMap, ls_refs::RefPrefixes, Handshake};
-        use gix_features::progress::Progress;
-        use std::borrow::Cow;
+        use crate::{Handshake, command::Feature, fetch::RefMap, ls_refs::RefPrefixes};
+
+        use gix_error::Result;
+        use gix_error::{ResultExt, message};
+        use gix_utils::progress::Progress;
 
         /// Intermediate state while potentially fetching a refmap after the handshake.
         pub enum ObtainRefMap<'a> {
@@ -87,57 +85,63 @@ pub(crate) mod hero {
             LsRefsCommand(crate::LsRefsCommand<'a>, crate::fetch::refmap::init::Context),
         }
 
+        macro_rules! fetch {
+            ($name:ident, $bisync:path, $transport:path, $invoke:ident, $mode:literal) => {
+                /// Fetch the refmap, either by returning the existing one or invoking the `ls-refs` command.
+                #[$bisync]
+                pub async fn $name(
+                    self,
+                    mut progress: impl Progress,
+                    transport: &mut impl $transport,
+                    trace_packetlines: bool,
+                ) -> gix_error::Result<RefMap> {
+                    let (cmd, cx) = match self {
+                        ObtainRefMap::Existing(map) => return Ok(map),
+                        ObtainRefMap::LsRefsCommand(cmd, cx) => (cmd, cx),
+                    };
+
+                    let _span = gix_trace::coarse!(
+                        "gix_protocol::handshake::ObtainRefMap::fetch()",
+                        mode = $mode
+                    );
+                    let capabilities = cmd.capabilities;
+                    let remote_refs = cmd
+                        .$invoke(transport, &mut progress, trace_packetlines)
+                        .await
+                        .or_raise(|| message("Failed to list references on the remote"))?;
+                    RefMap::from_refs(remote_refs, capabilities, cx)
+                }
+            };
+        }
+
         impl ObtainRefMap<'_> {
-            /// Fetch the refmap, either by returning the existing one or invoking the `ls-refs` command.
             #[cfg(feature = "async-client")]
-            #[allow(clippy::result_large_err)]
-            pub async fn fetch_async(
-                self,
-                mut progress: impl Progress,
-                transport: &mut impl async_io::Transport,
-                trace_packetlines: bool,
-            ) -> Result<RefMap, crate::fetch::refmap::init::Error> {
-                let (cmd, cx) = match self {
-                    ObtainRefMap::Existing(map) => return Ok(map),
-                    ObtainRefMap::LsRefsCommand(cmd, cx) => (cmd, cx),
-                };
+            fetch!(
+                fetch_async,
+                ::gix_macros::keep,
+                crate::transport::client::async_io::Transport,
+                invoke_async,
+                "async"
+            );
 
-                let _span = gix_trace::coarse!("gix_protocol::handshake::ObtainRefMap::fetch_async()");
-                let capabilities = cmd.capabilities;
-                let remote_refs = cmd.invoke_async(transport, &mut progress, trace_packetlines).await?;
-                RefMap::from_refs(remote_refs, capabilities, cx)
-            }
-
-            /// Fetch the refmap, either by returning the existing one or invoking the `ls-refs` command.
             #[cfg(feature = "blocking-client")]
-            #[allow(clippy::result_large_err)]
-            pub fn fetch_blocking(
-                self,
-                mut progress: impl Progress,
-                transport: &mut impl blocking_io::Transport,
-                trace_packetlines: bool,
-            ) -> Result<RefMap, crate::fetch::refmap::init::Error> {
-                let (cmd, cx) = match self {
-                    ObtainRefMap::Existing(map) => return Ok(map),
-                    ObtainRefMap::LsRefsCommand(cmd, cx) => (cmd, cx),
-                };
-
-                let _span = gix_trace::coarse!("gix_protocol::handshake::ObtainRefMap::fetch_blocking()");
-                let capabilities = cmd.capabilities;
-                let remote_refs = cmd.invoke_blocking(transport, &mut progress, trace_packetlines)?;
-                RefMap::from_refs(remote_refs, capabilities, cx)
-            }
+            fetch!(
+                fetch_blocking,
+                ::gix_macros::sync,
+                crate::transport::client::blocking_io::Transport,
+                invoke_blocking,
+                "blocking"
+            );
         }
 
         impl Handshake {
             /// Prepare fetching a [refmap](RefMap) if not present in the handshake.
-            #[allow(clippy::result_large_err)]
             pub fn prepare_lsrefs_or_extract_refmap(
                 &mut self,
-                user_agent: (&'static str, Option<Cow<'static, str>>),
+                user_agent: Feature,
                 prefix_from_spec_as_filter_on_remote: bool,
                 refmap_context: crate::fetch::refmap::init::Context,
-            ) -> Result<ObtainRefMap<'_>, crate::fetch::refmap::init::Error> {
+            ) -> Result<ObtainRefMap<'_>> {
                 if let Some(refs) = self.refs.take() {
                     return Ok(ObtainRefMap::Existing(RefMap::from_refs(
                         refs,
@@ -158,44 +162,6 @@ pub(crate) mod hero {
         }
     }
 }
-
-#[cfg(feature = "handshake")]
-mod error {
-    use bstr::BString;
-    use gix_transport::client;
-
-    use crate::{credentials, handshake::refs};
-
-    /// The error returned by [`handshake()`][crate::handshake()].
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum Error {
-        #[error("Failed to obtain credentials")]
-        Credentials(#[from] credentials::protocol::Error),
-        #[error("No credentials were returned at all as if the credential helper isn't functioning unknowingly")]
-        EmptyCredentials,
-        #[error("Credentials provided for \"{url}\" were not accepted by the remote")]
-        InvalidCredentials { url: BString, source: std::io::Error },
-        #[error(transparent)]
-        Transport(#[from] client::Error),
-        #[error("The transport didn't accept the advertised server version {actual_version:?} and closed the connection client side")]
-        TransportProtocolPolicyViolation { actual_version: gix_transport::Protocol },
-        #[error(transparent)]
-        ParseRefs(#[from] refs::parse::Error),
-    }
-
-    impl gix_transport::IsSpuriousError for Error {
-        fn is_spurious(&self) -> bool {
-            match self {
-                Error::Transport(err) => err.is_spurious(),
-                _ => false,
-            }
-        }
-    }
-}
-
-#[cfg(feature = "handshake")]
-pub use error::Error;
 
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 #[cfg(feature = "handshake")]

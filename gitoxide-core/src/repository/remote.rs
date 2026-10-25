@@ -1,9 +1,54 @@
+use gix::{
+    Result,
+    error::{OptionExt, ResultExt, bail, message},
+};
+
+/// Print the effective URL or URLs of the selected remote.
+///
+/// Without an explicit remote, selection follows the fetch or push configuration for the current branch according to `direction`.
+pub fn url(
+    repo: gix::Repository,
+    name: Option<&str>,
+    direction: gix::remote::Direction,
+    all: bool,
+    mut out: impl std::io::Write,
+) -> Result<()> {
+    let remote = match (name, direction) {
+        (Some(name), _) => repo.find_fetch_remote(Some(name.into()))?,
+        (None, gix::remote::Direction::Fetch) => repo.find_fetch_remote(None)?,
+        (None, gix::remote::Direction::Push) => repo
+            .head()?
+            .into_remote(gix::remote::Direction::Push)
+            .or_else(|| repo.find_default_remote(gix::remote::Direction::Push))
+            .transpose()?
+            .ok_or_raise(|| gix::error::not_found("Could not determine a remote for pushing"))?,
+    };
+    if all {
+        let mut urls = remote.urls(direction).peekable();
+        if urls.peek().is_none() {
+            bail!("The remote has no {} URL".not_found(), direction.as_str());
+        }
+        for url in urls {
+            out.write_all(&url.to_bstring()).or_error()?;
+            out.write_all(b"\n").or_error()?;
+        }
+    } else {
+        let url = remote
+            .url(direction)
+            .ok_or_raise(|| message!("The remote has no {} URL", direction.as_str()).not_found())?;
+        out.write_all(&url.to_bstring()).or_error()?;
+        out.write_all(b"\n").or_error()?;
+    }
+    Ok(())
+}
+
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 mod refs_impl {
-    use anyhow::bail;
     use gix::{
+        Result,
+        error::{OptionExt, ResultExt, bail, unsupported, validation},
         protocol::handshake,
-        refspec::{match_group::validate::Fix, RefSpec},
+        refspec::{RefSpec, match_group::validate::Fix},
         remote::fetch::refmap::Source,
     };
 
@@ -34,7 +79,7 @@ mod refs_impl {
         pub(crate) use super::{print, print_ref};
     }
 
-    #[gix::protocol::maybe_async::maybe_async]
+    #[gix::protocol::bisync::bisync]
     pub async fn refs_fn(
         repo: gix::Repository,
         kind: refs::Kind,
@@ -46,8 +91,7 @@ mod refs_impl {
             name_or_url,
             handshake_info,
         }: refs::Options,
-    ) -> anyhow::Result<()> {
-        use anyhow::Context;
+    ) -> Result<()> {
         let mut remote = by_name_or_url(&repo, name_or_url.as_deref())?;
         let show_unmapped = if let refs::Kind::Tracking {
             ref_specs,
@@ -55,7 +99,7 @@ mod refs_impl {
         } = &kind
         {
             if format != OutputFormat::Human {
-                bail!("JSON output isn't yet supported for listing ref-mappings.");
+                bail!(unsupported("JSON output isn't yet supported for listing ref-mappings."));
             }
             if !ref_specs.is_empty() {
                 remote.replace_refspecs(ref_specs.iter(), gix::remote::Direction::Fetch)?;
@@ -69,7 +113,7 @@ mod refs_impl {
             "Connecting to {:?}",
             remote
                 .url(gix::remote::Direction::Fetch)
-                .context("Remote didn't have a URL to connect to")?
+                .ok_or_raise(|| gix::error::not_found("Remote didn't have a URL to connect to"))?
                 .to_bstring()
         ));
         let (map, handshake) = remote
@@ -85,8 +129,8 @@ mod refs_impl {
             .await?;
 
         if handshake_info {
-            writeln!(out, "Handshake Information")?;
-            writeln!(out, "\t{handshake:?}")?;
+            writeln!(out, "Handshake Information").or_error()?;
+            writeln!(out, "\t{handshake:?}").or_error()?;
         }
         match kind {
             refs::Kind::Tracking { .. } => print_refmap(
@@ -104,7 +148,8 @@ mod refs_impl {
                     OutputFormat::Json => serde_json::to_writer_pretty(
                         out,
                         &map.remote_refs.into_iter().map(JsonRef::from).collect::<Vec<_>>(),
-                    )?,
+                    )
+                    .or_error()?,
                 }
                 Ok(())
             }
@@ -118,7 +163,7 @@ mod refs_impl {
         show_unmapped_remotes: bool,
         mut out: impl std::io::Write,
         mut err: impl std::io::Write,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let mut last_spec_index = gix::remote::fetch::refmap::SpecIndex::ExplicitInRemote(usize::MAX);
         map.mappings.sort_by_key(|m| m.spec_index);
         for mapping in &map.mappings {
@@ -128,33 +173,33 @@ mod refs_impl {
                     .spec_index
                     .get(refspecs, &map.extra_refspecs)
                     .expect("refspecs here are the ones used for mapping");
-                spec.to_ref().write_to(&mut out)?;
+                spec.to_ref().write_to(&mut out).or_error()?;
                 let is_implicit = mapping.spec_index.implicit_index().is_some();
                 if is_implicit {
-                    write!(&mut out, " (implicit")?;
+                    write!(&mut out, " (implicit").or_error()?;
                     if spec.to_ref()
                         == gix::remote::fetch::Tags::Included
                             .to_refspec()
                             .expect("always yields refspec")
                     {
-                        write!(&mut out, ", due to auto-tag")?;
+                        write!(&mut out, ", due to auto-tag").or_error()?;
                     }
-                    write!(&mut out, ")")?;
+                    write!(&mut out, ")").or_error()?;
                 }
-                writeln!(out)?;
+                writeln!(out).or_error()?;
             }
 
-            write!(out, "\t")?;
+            write!(out, "\t").or_error()?;
             let target_id = match &mapping.remote {
                 gix::remote::fetch::refmap::Source::ObjectId(id) => {
-                    write!(out, "{id}")?;
+                    write!(out, "{id}").or_error()?;
                     id
                 }
-                gix::remote::fetch::refmap::Source::Ref(r) => print_ref(&mut out, r)?,
+                gix::remote::fetch::refmap::Source::Ref(r) => print_ref(&mut out, r).or_error()?,
             };
             match &mapping.local {
                 Some(local) => {
-                    write!(out, " -> {local} ")?;
+                    write!(out, " -> {local} ").or_error()?;
                     match repo.try_find_reference(local)? {
                         Some(tracking) => {
                             let msg = match tracking.try_id() {
@@ -173,13 +218,15 @@ mod refs_impl {
                     }
                 }
                 None => writeln!(out, " (fetch only)"),
-            }?;
+            }
+            .or_error()?;
         }
         if !map.fixes.is_empty() {
             writeln!(
                 err,
                 "The following destination refs were removed as they didn't start with 'ref/'"
-            )?;
+            )
+            .or_error()?;
             map.fixes.sort_by(|l, r| match (l, r) {
                 (
                     Fix::MappingWithPartialDestinationRemoved { spec: l, .. },
@@ -192,10 +239,10 @@ mod refs_impl {
                     Fix::MappingWithPartialDestinationRemoved { name, spec } => {
                         if prev_spec.is_some_and(|prev_spec| prev_spec != spec) {
                             prev_spec = spec.into();
-                            spec.to_ref().write_to(&mut err)?;
-                            writeln!(err)?;
+                            spec.to_ref().write_to(&mut err).or_error()?;
+                            writeln!(err).or_error()?;
                         }
-                        writeln!(err, "\t{name}")?;
+                        writeln!(err, "\t{name}").or_error()?;
                     }
                 }
             }
@@ -207,22 +254,25 @@ mod refs_impl {
                 map.remote_refs.len(),
                 map.remote_refs.len() - map.mappings.len(),
                 refspecs.len()
-            )?;
+            )
+            .or_error()?;
             if show_unmapped_remotes {
-                writeln!(&mut out, "\nFiltered: ")?;
+                writeln!(&mut out, "\nFiltered: ").or_error()?;
                 for remote_ref in map.remote_refs.iter().filter(|r| {
                     !map.mappings.iter().any(|m| match &m.remote {
                         Source::Ref(other) => other == *r,
                         Source::ObjectId(_) => false,
                     })
                 }) {
-                    print_ref(&mut out, remote_ref)?;
-                    writeln!(&mut out)?;
+                    print_ref(&mut out, remote_ref).or_error()?;
+                    writeln!(&mut out).or_error()?;
                 }
             }
         }
         if refspecs.is_empty() {
-            bail!("Without refspecs there is nothing to show here. Add refspecs as arguments or configure them in .git/config.")
+            bail!(validation(
+                "Without refspecs there is nothing to show here. Add refspecs as arguments or configure them in .git/config."
+            ))
         }
         Ok(())
     }
@@ -327,12 +377,12 @@ mod refs_impl {
     }
 }
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
-pub use refs_impl::{refs, refs_fn as refs, JsonRef};
+pub use refs_impl::{JsonRef, refs, refs_fn as refs};
 
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub(crate) fn by_name_or_url<'repo>(
     repo: &'repo gix::Repository,
     name_or_url: Option<&str>,
-) -> anyhow::Result<gix::Remote<'repo>> {
-    repo.find_fetch_remote(name_or_url.map(Into::into)).map_err(Into::into)
+) -> Result<gix::Remote<'repo>> {
+    repo.find_fetch_remote(name_or_url.map(Into::into))
 }

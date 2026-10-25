@@ -1,3 +1,4 @@
+use crate::Result;
 use std::{path::PathBuf, sync::Arc};
 
 use gix_pack::data::output;
@@ -32,20 +33,25 @@ enum DbKind {
     DeterministicGeneratedContentMultiIndex,
 }
 
-fn db(kind: DbKind) -> crate::Result<gix_odb::HandleArc> {
+fn db(kind: DbKind, object_hash: gix_hash::Kind) -> Result<gix_odb::HandleArc> {
     use DbKind::*;
     let name = match kind {
         DeterministicGeneratedContent => "make_pack_gen_repo.sh",
         DeterministicGeneratedContentMultiIndex => "make_pack_gen_repo_multi_index.sh",
     };
     let path: PathBuf = crate::scripted_fixture_read_only(name)?.join(".git").join("objects");
-    gix_odb::Store::at_opts(path, &mut None.into_iter(), gix_odb::store::init::Options::default())
-        .map_err(Into::into)
-        .map(|store| {
-            let mut cache = Arc::new(store).to_cache_arc();
-            cache.prevent_pack_unload();
-            cache
-        })
+    gix_odb::Store::at_opts(
+        path,
+        object_hash,
+        &mut None.into_iter(),
+        gix_odb::store::init::Options::default(),
+    )
+    .map_err(Into::into)
+    .map(|store| {
+        let mut cache = Arc::new(store).to_cache_arc();
+        cache.prevent_pack_unload();
+        cache
+    })
 }
 
 mod count_and_entries;

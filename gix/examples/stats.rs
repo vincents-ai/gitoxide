@@ -1,8 +1,8 @@
 use std::io::Write;
 
-use gix::{prelude::ObjectIdExt, Reference};
+use gix::{Reference, prelude::ObjectIdExt};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut repo = gix::discover(".")?;
     println!("Repo: {}", repo.workdir().unwrap_or_else(|| repo.git_dir()).display());
     let mut max_parents = 0;

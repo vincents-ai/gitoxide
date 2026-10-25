@@ -1,29 +1,34 @@
-use std::{borrow::Cow, path::PathBuf};
+use crate::TestResult;
+use std::path::PathBuf;
 
-use bstr::{BStr, ByteSlice};
+use bstr::BString;
 use gix_config::File;
-use gix_testtools::fixture_path_standalone;
+use gix_testtools::fixture_path;
 
-pub fn cow_str(s: &str) -> Cow<'_, BStr> {
-    Cow::Borrowed(s.as_bytes().as_bstr())
+pub fn bstring(s: &str) -> BString {
+    s.into()
 }
 
 fn fuzz_artifact_paths(target: &str) -> Vec<PathBuf> {
-    let mut paths = std::fs::read_dir(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../fuzz/artifacts")
-            .join(target),
-    )
-    .expect("artifact directory exists")
-    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-    .collect::<Vec<_>>();
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let old_test_crate_root = crate_root.join("../fuzz/artifacts").join(target);
+    let folded_test_root = crate_root.join("fuzz/artifacts").join(target);
+    let artifact_root = if old_test_crate_root.is_dir() {
+        old_test_crate_root
+    } else {
+        folded_test_root
+    };
+    let mut paths = std::fs::read_dir(artifact_root)
+        .expect("artifact directory exists")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect::<Vec<_>>();
     paths.sort();
     paths
 }
 
 #[test]
 fn size_in_memory() {
-    let actual = std::mem::size_of::<gix_config::File<'_>>();
+    let actual = std::mem::size_of::<gix_config::File>();
     assert!(
         actual <= 1040,
         "{actual} <= 1040: This shouldn't change without us noticing"
@@ -32,11 +37,11 @@ fn size_in_memory() {
 
 mod open {
     use gix_config::File;
-    use gix_testtools::fixture_path_standalone;
+    use gix_testtools::fixture_path;
 
     #[test]
     fn parse_config_with_windows_line_endings_successfully() {
-        File::from_path_no_includes(fixture_path_standalone("repo-config.crlf"), gix_config::Source::Local).unwrap();
+        File::from_path_no_includes(fixture_path("repo-config.crlf"), gix_config::Source::Local).unwrap();
     }
 }
 
@@ -69,8 +74,8 @@ fn fuzzed_stackoverflow() {
 }
 
 #[test]
-fn fuzzed_long_runtime() -> crate::Result {
-    let config = std::fs::read(fixture_path_standalone("fuzzed/long-parsetime.config"))?;
+fn fuzzed_long_runtime() -> TestResult {
+    let config = std::fs::read(fixture_path("fuzzed/long-parsetime.config"))?;
     let file = File::from_bytes_no_includes(&config, gix_config::file::Metadata::default(), Default::default())?;
     assert_eq!(file.sections().count(), 52);
     assert!(file.to_bstring().len() < 1200000);
@@ -81,7 +86,7 @@ fn fuzzed_long_runtime() -> crate::Result {
     )?;
 
     let mut mutated_file = file.clone();
-    mutated_file.append(file);
+    mutated_file.append(file)?;
     assert_eq!(mutated_file.sections().count(), 52 * 2);
     let serialized = mutated_file.to_bstring();
     assert!(serialized.len() < 2400000);

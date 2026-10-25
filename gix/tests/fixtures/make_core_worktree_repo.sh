@@ -26,6 +26,10 @@ git clone --shared base relative-worktree
   git status --porcelain > .git/status.baseline
 )
 
+# Opening relative-worktree through this symlink exercises preservation of the
+# caller's path namespace when only an ancestor of the Git directory is linked.
+ln -s . symlinked-ancestor
+
 git clone --shared base absolute-worktree
 (cd absolute-worktree
   git config --local core.worktree "$WORKTREE_ABS"
@@ -49,4 +53,15 @@ git clone --bare --shared base bare-relative-worktree
 (cd bare-relative-worktree
   git config --local core.worktree ../worktree
   git status --porcelain || : > status.baseline
+)
+
+mkdir linked-git-dir-detached-worktree
+(cd linked-git-dir-detached-worktree
+  mkdir -p home store
+  git init -q store/dots
+  ln -s ../store/dots/.git home/.git
+  git -C store/dots config core.worktree ../../../home
+  echo "Git resolves the symlinked top-level .git to the real git dir before applying relative core.worktree." \
+    >baseline.note
+  git -C home rev-parse --show-toplevel >worktree.baseline
 )

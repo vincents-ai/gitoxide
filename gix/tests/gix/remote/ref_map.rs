@@ -1,19 +1,25 @@
 #[cfg(any(feature = "blocking-network-client", feature = "async-network-client-async-std"))]
 mod blocking_and_async_io {
     use gix::{config::tree::Protocol, remote::Direction::Fetch};
-    use gix_features::progress;
-    use gix_protocol::maybe_async;
+    use gix_protocol::bisync;
+    use gix_testtools::TestResult;
+    use gix_utils::progress;
 
     use crate::{
         remote,
         remote::{into_daemon_remote_if_async, spawn_git_daemon_if_async},
     };
 
-    #[maybe_async::test(
-        feature = "blocking-network-client",
-        async(feature = "async-network-client-async-std", async_std::test)
-    )]
-    async fn all() -> crate::Result {
+    #[bisync::bisync]
+    #[cfg_attr(feature = "blocking-network-client", test)]
+    #[cfg_attr(feature = "async-network-client-async-std", async_std::test)]
+    async fn all() -> TestResult {
+        // Blocking local ref discovery spawns `upload-pack`, which inherits ambient Git configuration.
+        // Isolate it in a child to keep ref-map I/O parallel without changing the parent environment.
+        #[cfg(feature = "blocking-network-client")]
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
         let daemon = spawn_git_daemon_if_async(remote::repo_path("base"))?;
         for (fetch_tags, version, expected_remote_refs, expected_mappings) in [
             (gix::remote::fetch::Tags::None, None, 11, 11),
@@ -71,10 +77,10 @@ mod blocking_and_async_io {
                 .ref_map(progress::Discard, Default::default())
                 .await?;
             assert_eq!(
-                    map.remote_refs.len(),
-                    expected_remote_refs ,
-                    "{version:?} fetch-tags={fetch_tags:?}: it gets all remote refs, independently of the refspec. But we use a prefix so pre-filter them."
-                );
+                map.remote_refs.len(),
+                expected_remote_refs,
+                "{version:?} fetch-tags={fetch_tags:?}: it gets all remote refs, independently of the refspec. But we use a prefix so pre-filter them."
+            );
 
             assert_eq!(map.fixes.len(), 0);
             assert_eq!(

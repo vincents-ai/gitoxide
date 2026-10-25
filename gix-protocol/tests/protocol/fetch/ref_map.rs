@@ -1,8 +1,86 @@
+mod from_refs {
+    use gix_protocol::fetch::{RefMap, refmap};
+    use gix_transport::client::Capabilities;
+
+    #[test]
+    fn sha1_capability_is_honored() {
+        let caps = caps_with(b"symref=HEAD:refs/heads/main object-format=sha1 agent=git/2.54.0");
+        let map = RefMap::from_refs(Vec::new(), &caps, ctx()).expect("known format");
+        assert_eq!(
+            map.object_hash,
+            gix_hash::Kind::Sha1,
+            "An `object-format=sha1` capability resolves to `gix_hash::Kind::Sha1` on the resulting RefMap"
+        );
+    }
+
+    #[cfg(feature = "sha256")]
+    #[test]
+    fn sha256_capability_is_honored() {
+        let caps = caps_with(b"symref=HEAD:refs/heads/main object-format=sha256 agent=git/2.54.0");
+        let map = RefMap::from_refs(Vec::new(), &caps, ctx()).expect("known format");
+        assert_eq!(
+            map.object_hash,
+            gix_hash::Kind::Sha256,
+            "An `object-format=sha256` capability resolves to `gix_hash::Kind::Sha256`, so Sha256 servers
+            can be talked to without falling back to Sha1"
+        );
+    }
+
+    #[test]
+    fn unknown_object_format_errors() {
+        let caps = caps_with(b"symref=HEAD:refs/heads/main object-format=sha999 agent=git/2.54.0");
+        let err = RefMap::from_refs(Vec::new(), &caps, ctx()).expect_err("unknown format must error");
+        insta::assert_debug_snapshot!(err, "unknown formats are unsupported", @r#"The object format used by the remote is unsupported: sha999, input="sha999""#);
+        assert!(err.is_unsupported(), "unknown formats require another implementation");
+        let metadata = err.metadata().next().expect("the unsupported format is retained");
+        assert_eq!(
+            metadata.get("input"),
+            Some(&gix_error::MetadataValue::from(b"sha999".as_slice())),
+            "the unsupported format is retained for callers"
+        );
+    }
+
+    #[test]
+    fn malformed_object_format_retains_its_source() {
+        let caps = caps_with(b"object-format=\xff");
+        let err = RefMap::from_refs(Vec::new(), &caps, ctx()).expect_err("the format is not UTF-8");
+        assert!(err.is_corrupted(), "malformed peer bytes are corruption");
+        assert!(
+            err.downcast_any_ref::<bstr::Utf8Error>().is_some(),
+            "the native decoding failure remains available"
+        );
+    }
+
+    #[test]
+    fn missing_object_format_defaults_to_sha1() {
+        let caps = caps_with(b"symref=HEAD:refs/heads/main agent=git/2.54.0");
+        let map = RefMap::from_refs(Vec::new(), &caps, ctx()).expect("implicit sha1");
+        assert_eq!(
+            map.object_hash,
+            gix_hash::Kind::Sha1,
+            "Servers that omit `object-format` are implicitly Sha1, so the RefMap should reflect that"
+        );
+    }
+
+    fn caps_with(after_nul: &[u8]) -> Capabilities {
+        let mut bytes: Vec<u8> = b"7814e8a05a59c0cf5fb186661d1551c75d1299b5 HEAD\0".to_vec();
+        bytes.extend_from_slice(after_nul);
+        Capabilities::from_bytes(&bytes).expect("valid capabilities line").0
+    }
+
+    fn ctx() -> refmap::init::Context {
+        refmap::init::Context {
+            fetch_refspecs: Vec::new(),
+            extra_refspecs: Vec::new(),
+        }
+    }
+}
+
 mod is_missing_required_mapping {
     use gix_protocol::{
         fetch::{
-            refmap::{Mapping, Source, SpecIndex},
             RefMap,
+            refmap::{Mapping, Source, SpecIndex},
         },
         handshake::Ref,
     };

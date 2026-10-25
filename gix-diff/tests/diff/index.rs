@@ -1,14 +1,16 @@
 use gix_diff::{
+    Rewrites,
     index::Change,
     rewrites::{Copies, CopySource},
-    Rewrites,
 };
+use gix_error::ErrorExt;
 use gix_object::bstr::BStr;
+use gix_testtools::TestResult;
 
 #[test]
-fn empty_to_new_tree_without_rename_tracking() -> crate::Result {
-    let changes = collect_changes_no_renames(None, "c1 - initial").expect("really just an addition - nothing to track");
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+fn empty_to_new_tree_without_rename_tracking() -> TestResult {
+    let changes = collect_changes_no_renames(None, "c1 - initial")?;
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Addition {
             location: "a",
@@ -50,25 +52,26 @@ fn empty_to_new_tree_without_rename_tracking() -> crate::Result {
         let err = gix_diff::index(
             &lhs,
             &rhs,
-            |_change| Err(std::io::Error::other("custom error")),
+            |_change| Err(gix_error::message("custom error").raise()),
             None::<gix_diff::index::RewriteOptions<'_, gix_odb::Handle>>,
             &mut pathspec,
             &mut |_, _, _, _| true,
         )
         .unwrap_err();
-        assert_eq!(
-            format!("{err:?}"),
-            r#"Callback(Custom { kind: Other, error: "custom error" })"#,
-            "custom errors made visible and not squelched"
-        );
+        insta::assert_debug_snapshot!(err, "index diff retains both callback context and the callback's error", @"
+        The callback indicated failure
+
+        Caused by:
+            0: custom error
+        ");
     }
     Ok(())
 }
 
 #[test]
-fn changes_against_modified_tree_with_filename_tracking() -> crate::Result {
+fn changes_against_modified_tree_with_filename_tracking() -> TestResult {
     let changes = collect_changes_no_renames("c2", "c3-modification")?;
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Modification {
             location: "a",
@@ -102,7 +105,7 @@ fn changes_against_modified_tree_with_filename_tracking() -> crate::Result {
 }
 
 #[test]
-fn renames_by_identity() -> crate::Result {
+fn renames_by_identity() -> TestResult {
     for (from, to, expected, assert_msg, track_empty) in [
         (
             "c3-modification",
@@ -193,8 +196,7 @@ fn renames_by_identity() -> crate::Result {
 }
 
 #[test]
-fn rename_by_similarity() -> crate::Result {
-    insta::allow_duplicates! {
+fn rename_by_similarity() -> TestResult {
     for percentage in [
         None,
         Some(0.76), /*cutoff point where git stops seeing it as equal */
@@ -206,8 +208,9 @@ fn rename_by_similarity() -> crate::Result {
                 percentage,
                 ..Default::default()
             }),
-        ).expect("errors can only happen with IO or ODB access fails");
-            insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+        )?;
+        insta::allow_duplicates! {
+            insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
             [
                 Modification {
                     location: "b",
@@ -240,11 +243,11 @@ fn rename_by_similarity() -> crate::Result {
                 },
             ]
             "#);
-            let out = out.expect("tracking enabled");
-            assert_eq!(out.num_similarity_checks, if percentage.is_some() { 1 } else { 0 });
-            assert_eq!(out.num_similarity_checks_skipped_for_rename_tracking_due_to_limit, 0);
-            assert_eq!(out.num_similarity_checks_skipped_for_copy_tracking_due_to_limit, 0);
         }
+        let out = out.expect("tracking enabled");
+        assert_eq!(out.num_similarity_checks, if percentage.is_some() { 1 } else { 0 });
+        assert_eq!(out.num_similarity_checks_skipped_for_rename_tracking_due_to_limit, 0);
+        assert_eq!(out.num_similarity_checks_skipped_for_copy_tracking_due_to_limit, 0);
     }
 
     let (changes, out) = collect_changes_opts(
@@ -255,10 +258,9 @@ fn rename_by_similarity() -> crate::Result {
             limit: 1, // has no effect as it's just one item here.
             ..Default::default()
         }),
-    )
-    .expect("it found all items at the cut-off point, similar to git");
+    )?;
 
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Modification {
             location: "b",
@@ -299,7 +301,7 @@ fn rename_by_similarity() -> crate::Result {
 }
 
 #[test]
-fn renames_by_similarity_with_limit() -> crate::Result {
+fn renames_by_similarity_with_limit() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "c6",
         "r5",
@@ -357,7 +359,7 @@ fn renames_by_similarity_with_limit() -> crate::Result {
 }
 
 #[test]
-fn copies_by_identity() -> crate::Result {
+fn copies_by_identity() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "c7",
         "tc1-identity",
@@ -370,7 +372,7 @@ fn copies_by_identity() -> crate::Result {
             ..Default::default()
         }),
     )?;
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Rewrite {
             source_location: "base",
@@ -428,7 +430,7 @@ fn copies_by_identity() -> crate::Result {
 }
 
 #[test]
-fn copies_by_similarity() -> crate::Result {
+fn copies_by_similarity() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "tc1-identity",
         "tc2-similarity",
@@ -437,7 +439,7 @@ fn copies_by_similarity() -> crate::Result {
             ..Default::default()
         }),
     )?;
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Rewrite {
             source_location: "base",
@@ -499,7 +501,7 @@ fn copies_by_similarity() -> crate::Result {
 }
 
 #[test]
-fn copies_in_entire_tree_by_similarity() -> crate::Result {
+fn copies_in_entire_tree_by_similarity() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "tc2-similarity",
         "tc3-find-harder",
@@ -539,11 +541,7 @@ fn copies_in_entire_tree_by_similarity() -> crate::Result {
         }),
     )?;
 
-    // As the full-tree traversal order is different, it sees candidates in different order.
-    // Let's keep this as expectations, as in future there might be a candidate-based search that considers filenames
-    // or similarity in names.
-    match crate::fixture_hash_kind() {
-        gix_hash::Kind::Sha1 => insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
         [
             Rewrite {
                 source_location: "base",
@@ -604,73 +602,9 @@ fn copies_in_entire_tree_by_similarity() -> crate::Result {
                 id: Oid(6),
             },
         ]
-        "#),
-        gix_hash::Kind::Sha256 => insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
-        [
-            Rewrite {
-                source_location: "base",
-                source_index: 3,
-                source_entry_mode: Mode(
-                    FILE,
-                ),
-                source_id: Oid(1),
-                location: "c6",
-                index: 8,
-                entry_mode: Mode(
-                    FILE,
-                ),
-                id: Oid(1),
-                copy: true,
-            },
-            Rewrite {
-                source_location: "r/c3di",
-                source_index: 12,
-                source_entry_mode: Mode(
-                    FILE,
-                ),
-                source_id: Oid(2),
-                location: "c7",
-                index: 9,
-                entry_mode: Mode(
-                    FILE,
-                ),
-                id: Oid(2),
-                copy: true,
-            },
-            Rewrite {
-                source_location: "base",
-                source_index: 3,
-                source_entry_mode: Mode(
-                    FILE,
-                ),
-                source_id: Oid(1),
-                location: "newly-added",
-                index: 19,
-                entry_mode: Mode(
-                    FILE,
-                ),
-                id: Oid(3),
-                copy: true,
-            },
-            Modification {
-                location: "b",
-                previous_index: 0,
-                previous_entry_mode: Mode(
-                    FILE,
-                ),
-                previous_id: Oid(4),
-                index: 0,
-                entry_mode: Mode(
-                    FILE,
-                ),
-                id: Oid(5),
-            },
-        ]
-        "#),
-        _ => unreachable!("tests only support sha1 and sha256 fixtures"),
-    }
+        "#);
     let out = out.expect("tracking enabled");
-    assert_eq!(out.num_similarity_checks, 4);
+    assert_eq!(out.num_similarity_checks, 22);
     assert_eq!(
         out.num_similarity_checks_skipped_for_rename_tracking_due_to_limit, 0,
         "no limit configured"
@@ -681,7 +615,7 @@ fn copies_in_entire_tree_by_similarity() -> crate::Result {
 }
 
 #[test]
-fn copies_in_entire_tree_by_similarity_with_limit() -> crate::Result {
+fn copies_in_entire_tree_by_similarity_with_limit() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "tc2-similarity",
         "tc3-find-harder",
@@ -690,14 +624,14 @@ fn copies_in_entire_tree_by_similarity_with_limit() -> crate::Result {
                 source: CopySource::FromSetOfModifiedFilesAndAllSources,
                 ..Default::default()
             }),
-            limit: 2, // similarity checks can't be made that way
+            limit: 1, // similarity checks can't be made that way
             track_empty: false,
             ..Default::default()
         }),
     )?;
 
     // Again, it finds a different first match for the rewrite compared to tree-traversal, expected for now.
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&changes).0, @r#"
     [
         Rewrite {
             source_location: "base",
@@ -765,7 +699,7 @@ fn copies_in_entire_tree_by_similarity_with_limit() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_by_identity() -> crate::Result {
+fn realistic_renames_by_identity() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "r1-base",
         "r1-change",
@@ -777,7 +711,7 @@ fn realistic_renames_by_identity() -> crate::Result {
         }),
     )?;
 
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Rewrite {
             source_location: "git-index/src/file.rs",
@@ -827,9 +761,9 @@ fn realistic_renames_by_identity() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_disabled() -> crate::Result {
+fn realistic_renames_disabled() -> TestResult {
     let changes = collect_changes_no_renames("r1-base", "r1-change")?;
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Deletion {
             location: "git-index/src/file.rs",
@@ -874,10 +808,10 @@ fn realistic_renames_disabled() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_disabled_3() -> crate::Result {
+fn realistic_renames_disabled_3() -> TestResult {
     let changes = collect_changes_no_renames("r3-base", "r3-change")?;
 
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Addition {
             location: "src/ein.rs",
@@ -918,7 +852,7 @@ fn realistic_renames_disabled_3() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_by_identity_3() -> crate::Result {
+fn realistic_renames_by_identity_3() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "r3-base",
         "r3-change",
@@ -930,7 +864,7 @@ fn realistic_renames_by_identity_3() -> crate::Result {
         }),
     )?;
 
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Rewrite {
             source_location: "src/plumbing-cli.rs",
@@ -977,7 +911,7 @@ fn realistic_renames_by_identity_3() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_2() -> crate::Result {
+fn realistic_renames_2() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "r2-base",
         "r2-change",
@@ -991,7 +925,7 @@ fn realistic_renames_2() -> crate::Result {
     // We cannot capture renames if track-empty is disabled, as these are actually empty,
     // and we can't take directory-shortcuts here (i.e. tracking knows no directories here
     // as is the case with trees where we traverse breadth-first.
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Deletion {
             location: "git-sec/CHANGELOG.md",
@@ -1136,7 +1070,7 @@ fn realistic_renames_2() -> crate::Result {
 }
 
 #[test]
-fn realistic_renames_3_without_identity() -> crate::Result {
+fn realistic_renames_3_without_identity() -> TestResult {
     let (changes, out) = collect_changes_opts(
         "r4-base",
         "r4-dir-rename-non-identity",
@@ -1153,7 +1087,7 @@ fn realistic_renames_3_without_identity() -> crate::Result {
     // and SHA-1/SHA-256 produce a different id ordering for these same files.
     match crate::fixture_hash_kind() {
         gix_hash::Kind::Sha1 => {
-            insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+            insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
             [
                 Rewrite {
                     source_location: "src/plumbing/options.rs",
@@ -1204,7 +1138,7 @@ fn realistic_renames_3_without_identity() -> crate::Result {
             "#);
         }
         gix_hash::Kind::Sha256 => {
-            insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+            insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
             [
                 Rewrite {
                     source_location: "src/plumbing/mod.rs",
@@ -1278,7 +1212,7 @@ fn realistic_renames_3_without_identity() -> crate::Result {
     )?;
 
     // Pathspecs are applied in advance, which affects rename tracking.
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Deletion {
             location: "src/plumbing/main.rs",
@@ -1311,7 +1245,7 @@ fn realistic_renames_3_without_identity() -> crate::Result {
         Some("src/plumbing-renamed/m*"),
     )?;
     // One can also get the other side of the rename
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @r#"
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @r#"
     [
         Addition {
             location: "src/plumbing-renamed/main.rs",
@@ -1336,7 +1270,54 @@ fn realistic_renames_3_without_identity() -> crate::Result {
 }
 
 #[test]
-fn unmerged_entries_and_intent_to_add() -> crate::Result {
+fn sparse_indices_are_invalid_diff_input() -> gix_error::TestResult {
+    let (empty, mut sparse, _, _, mut pathspec) = repo_with_indices(None, None, None)?;
+    let object_hash = crate::fixture_hash_kind();
+    sparse.dangerously_push_entry(
+        Default::default(),
+        object_hash.empty_tree(),
+        gix_index::entry::Flags::SKIP_WORKTREE,
+        gix_index::entry::Mode::DIR,
+        "sparse/".into(),
+    );
+    let mut bytes = Vec::new();
+    sparse.write_to(
+        &mut bytes,
+        gix_index::write::Options {
+            extensions: gix_index::write::Extensions::None,
+            ..Default::default()
+        },
+    )?;
+    gix_index::extension::sparse::write_to(&mut bytes)?;
+    bytes.extend_from_slice(object_hash.null().as_bytes());
+    let (sparse, _) = gix_index::State::from_bytes(&bytes, sparse.timestamp(), object_hash, Default::default())?;
+    assert!(
+        sparse.is_sparse(),
+        "decoding records the sparse directory entry and marker"
+    );
+
+    for (lhs, rhs) in [(&sparse, &empty), (&empty, &sparse)] {
+        let err = gix_diff::index(
+            lhs,
+            rhs,
+            |_| panic!("sparse indices must be rejected before emitting changes"),
+            None::<gix_diff::index::RewriteOptions<'_, gix_object::find::Never>>,
+            &mut pathspec,
+            &mut |_, _, _, _| false,
+        )
+        .expect_err("both sides of an index diff must be non-sparse");
+        assert!(err.is_validation(), "sparse indices must be expanded before diffing");
+        assert_eq!(
+            err.to_string(),
+            "Cannot diff indices that contain sparse entries",
+            "classification preserves the diagnostic"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn unmerged_entries_and_intent_to_add() -> TestResult {
     let (changes, _out) = collect_changes_opts(
         "r4-dir-rename-non-identity",
         ".git/index",
@@ -1351,13 +1332,31 @@ fn unmerged_entries_and_intent_to_add() -> crate::Result {
     // Intent-to-add is transparent. And unmerged entries aren't emitted either, along with
     // their sibling paths.
     // All that with rename tracking…
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @"[]");
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @"[]");
 
     let changes = collect_changes_no_renames("r4-dir-rename-non-identity", ".git/index")?;
     // …or without
-    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())), @"[]");
+    insta::assert_snapshot!(crate::normalize_debug_snapshot(&(changes.into_iter().collect::<Vec<_>>())).0, @"[]");
 
-    let (index, _, _, _, _) = repo_with_indices(".git/index", ".git/index", None)?;
+    let (index, _, _, _, mut pathspec) = repo_with_indices(".git/index", ".git/index", None)?;
+    let err = gix_diff::index(
+        &index,
+        &index,
+        |_| panic!("unmerged left-hand entries must be rejected before emitting changes"),
+        None::<gix_diff::index::RewriteOptions<'_, gix_object::find::Never>>,
+        &mut pathspec,
+        &mut |_, _, _, _| false,
+    )
+    .expect_err("unmerged entries are allowed only in the right-hand index");
+    assert!(
+        err.is_validation(),
+        "unmerged left-hand entries violate the diff contract"
+    );
+    assert_eq!(
+        err.to_string(),
+        "Unmerged entries aren't allowed in the left-hand index, only in the right-hand index",
+        "classification preserves the diagnostic"
+    );
     assert_eq!(
         index.entry_by_path("will-add".into()).map(|e| e.id),
         Some(crate::fixture_hash_kind().empty_blob()),
@@ -1368,15 +1367,13 @@ fn unmerged_entries_and_intent_to_add() -> crate::Result {
 }
 
 mod util {
-    use std::{
-        convert::Infallible,
-        path::{Path, PathBuf},
-    };
+    use crate::Result;
+    use std::path::{Path, PathBuf};
 
     use gix_diff::rewrites;
 
-    fn repo_workdir() -> crate::Result<PathBuf> {
-        gix_testtools::scripted_fixture_read_only_standalone("make_diff_for_rewrites_repo.sh")
+    fn repo_workdir() -> Result<PathBuf> {
+        crate::scripted_fixture_read_only("make_diff_for_rewrites_repo.sh")
     }
 
     pub fn repo_with_indices(
@@ -1397,7 +1394,12 @@ mod util {
 
         let cache = gix_diff::blob::Platform::new(
             Default::default(),
-            gix_diff::blob::Pipeline::new(Default::default(), Default::default(), Vec::new(), Default::default()),
+            gix_diff::blob::Pipeline::new(
+                Default::default(),
+                gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
+                Vec::new(),
+                Default::default(),
+            ),
             Default::default(),
             gix_worktree::Stack::new(
                 &root,
@@ -1443,7 +1445,7 @@ mod util {
         let rewrites_info = gix_diff::index(
             &from,
             &to,
-            |change| -> Result<_, Infallible> {
+            |change| -> gix_error::Result<_> {
                 out.push(change.into_owned());
                 Ok(std::ops::ControlFlow::Continue(()))
             },
@@ -1471,7 +1473,7 @@ mod util {
         } else {
             let tree_id_path = root.join(tree).with_extension("tree");
             let hex_id = std::fs::read_to_string(&tree_id_path).map_err(|err| {
-                std::io::Error::other(format!("Could not read '{}': {}", tree_id_path.display(), err))
+                std::io::Error::other(format!("Could not read \"{}\": {err}", tree_id_path.display()))
             })?;
             let tree_id = gix_hash::ObjectId::from_hex(hex_id.trim().as_bytes())?;
             Ok(gix_index::State::from_tree(&tree_id, odb, Default::default())?)

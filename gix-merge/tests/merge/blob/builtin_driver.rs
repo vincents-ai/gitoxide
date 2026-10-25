@@ -1,7 +1,6 @@
 use gix_merge::blob::{
-    builtin_driver,
+    Resolution, builtin_driver,
     builtin_driver::binary::{Pick, ResolveWith},
-    Resolution,
 };
 
 #[test]
@@ -30,10 +29,10 @@ mod text {
     use arbitrary::Arbitrary;
     use bstr::ByteSlice;
     use gix_merge::blob::{
-        builtin_driver,
+        Resolution, builtin_driver,
         builtin_driver::text::{self, Conflict, ConflictStyle},
-        Resolution,
     };
+    use gix_testtools::TestResult;
     use pretty_assertions::assert_str_eq;
     use std::num::NonZero;
 
@@ -203,7 +202,7 @@ mod text {
     }
 
     #[test]
-    fn run_baseline() -> crate::Result {
+    fn run_baseline() -> TestResult {
         let root = gix_testtools::scripted_fixture_read_only("text-baseline.sh")?;
         for (baseline, diverging, expected_percentage) in [
             ("baseline.cases", DIVERGING, 10),
@@ -359,8 +358,76 @@ mod text {
         }
     }
 
+    #[test]
+    fn adjacent_changes_conflict_while_changes_with_a_gap_merge_cleanly() {
+        let base = b"one\ntwo\nthree\nfour\nfive\n";
+        let ours = b"one\ntwo-ours\nthree\nfour\nfive\n";
+        let adjacent_theirs = b"one\ntwo\nthree-theirs\nfour\nfive\n";
+        let separated_theirs = b"one\ntwo\nthree\nfour-theirs\nfive\n";
+        let labels = text::Labels {
+            ancestor: Some("base".into()),
+            current: Some("current".into()),
+            other: Some("other".into()),
+        };
+        let options = text::Options {
+            conflict: Conflict::Keep {
+                style: ConflictStyle::Merge,
+                marker_size: NonZero::new(7).expect("seven is non-zero"),
+            },
+            ..Default::default()
+        };
+
+        for (name, current, other, expected) in [
+            (
+                "ours then theirs",
+                ours.as_slice(),
+                adjacent_theirs.as_slice(),
+                "one\n<<<<<<< current\ntwo-ours\nthree\n=======\ntwo\nthree-theirs\n>>>>>>> other\nfour\nfive\n",
+            ),
+            (
+                "theirs then ours",
+                adjacent_theirs.as_slice(),
+                ours.as_slice(),
+                "one\n<<<<<<< current\ntwo\nthree-theirs\n=======\ntwo-ours\nthree\n>>>>>>> other\nfour\nfive\n",
+            ),
+        ] {
+            let mut out = Vec::new();
+            let mut input = imara_diff::InternedInput::default();
+            let resolution = builtin_driver::text(&mut out, &mut input, labels, current, base, other, options);
+            assert_eq!(
+                resolution,
+                Resolution::Conflict,
+                "{name}: adjacent changes must conflict because no unchanged base line separates them"
+            );
+            assert_str_eq!(
+                out.as_bstr().to_str_lossy(),
+                expected,
+                "{name}: adjacent changes must be rendered as one conflict"
+            );
+        }
+
+        for (name, current, other) in [
+            ("ours then theirs", ours.as_slice(), separated_theirs.as_slice()),
+            ("theirs then ours", separated_theirs.as_slice(), ours.as_slice()),
+        ] {
+            let mut out = Vec::new();
+            let mut input = imara_diff::InternedInput::default();
+            let resolution = builtin_driver::text(&mut out, &mut input, labels, current, base, other, options);
+            assert_eq!(
+                resolution,
+                Resolution::Complete,
+                "{name}: changes separated by an unchanged base line must merge independently"
+            );
+            assert_str_eq!(
+                out.as_bstr().to_str_lossy(),
+                "one\ntwo-ours\nthree\nfour-theirs\nfive\n",
+                "{name}: a gap between changes must preserve both edits without conflict markers"
+            );
+        }
+    }
+
     mod false_conflict {
-        use gix_merge::blob::{builtin_driver, builtin_driver::text::Conflict, Resolution};
+        use gix_merge::blob::{Resolution, builtin_driver, builtin_driver::text::Conflict};
         use imara_diff::InternedInput;
 
         /// Minimal reproduction: Myers produces a false conflict where git merge-file resolves cleanly.
@@ -521,7 +588,7 @@ mod text {
 
         fn read_blob(root: &Path, rela_path: &str) -> BString {
             std::fs::read(root.join(rela_path))
-                .unwrap_or_else(|err| panic!("Failed to read '{rela_path}' in '{}': {err}", root.display()))
+                .unwrap_or_else(|err| panic!("Failed to read \"{rela_path}\" in \"{}\": {err}", root.display()))
                 .into()
         }
     }

@@ -1,4 +1,22 @@
-use gix_index::entry::{mode::Change, Mode};
+use gix_index::entry::{Mode, mode::Change};
+
+#[test]
+fn is_dir_for_pattern_matching() {
+    for (mode, expected) in [
+        (Mode::DIR, true),
+        (Mode::COMMIT, true),
+        (Mode::FILE, false),
+        (Mode::FILE_EXECUTABLE, false),
+        (Mode::SYMLINK, false),
+        (Mode::empty(), false),
+    ] {
+        assert_eq!(
+            mode.is_dir_for_pattern_matching(),
+            expected,
+            "{mode:?}: decoded modes have the same classification on every host"
+        );
+    }
+}
 
 #[test]
 fn apply() {

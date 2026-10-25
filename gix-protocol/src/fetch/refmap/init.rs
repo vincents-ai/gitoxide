@@ -1,25 +1,14 @@
-use bstr::{BString, ByteSlice};
+use bstr::ByteSlice;
+use gix_error::{Result, ResultExt, corruption, message};
 use gix_transport::client::Capabilities;
 
 use crate::{
     fetch::{
-        refmap::{Mapping, Source, SpecIndex},
         RefMap,
+        refmap::{Mapping, Source, SpecIndex},
     },
     handshake::Ref,
 };
-
-/// The error returned by [`crate::Handshake::prepare_lsrefs_or_extract_refmap()`].
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error("The object format {format:?} as used by the remote is unsupported")]
-    UnknownObjectFormat { format: BString },
-    #[error(transparent)]
-    MappingValidation(#[from] gix_refspec::match_group::validate::Error),
-    #[error(transparent)]
-    ListRefs(#[from] crate::ls_refs::Error),
-}
 
 /// For use in [`RefMap::from_refs()`].
 #[derive(Debug, Clone)]
@@ -44,7 +33,8 @@ impl Context {
 impl RefMap {
     /// Create a ref-map from already obtained `remote_refs`. Use `context` to pass in refspecs.
     /// `capabilities` are used to determine the object format.
-    pub fn from_refs(remote_refs: Vec<Ref>, capabilities: &Capabilities, context: Context) -> Result<RefMap, Error> {
+    /// Invalid or unsupported object formats include their bytes as `input` [metadata](gix_error::Error::metadata()).
+    pub fn from_refs(remote_refs: Vec<Ref>, capabilities: &Capabilities, context: Context) -> Result<RefMap> {
         let all_refspecs = context.aggregate_refspecs();
         let Context {
             fetch_refspecs,
@@ -52,7 +42,8 @@ impl RefMap {
         } = context;
         let num_explicit_specs = fetch_refspecs.len();
         let group = gix_refspec::MatchGroup::from_fetch_specs(all_refspecs.iter().map(gix_refspec::RefSpec::to_ref));
-        let null = gix_hash::ObjectId::null(gix_hash::Kind::Sha1); // OK to hardcode Sha1, it's not supposed to match, ever.
+        let object_hash = extract_object_hash(capabilities)?;
+        let null = object_hash.null();
         let (res, fixes) = group
             .match_lhs(remote_refs.iter().map(|r| {
                 let (full_ref_name, target, object) = r.unpack();
@@ -62,7 +53,8 @@ impl RefMap {
                     object,
                 }
             }))
-            .validated()?;
+            .validated()
+            .or_raise(|| message("Failed to validate mappings between remote and local references"))?;
 
         let mappings = res.mappings;
         let mappings = mappings
@@ -86,20 +78,6 @@ impl RefMap {
             })
             .collect();
 
-        // Assume sha1 if server says nothing, otherwise configure anything beyond sha1 in the local repo configuration
-        let object_hash = if let Some(object_format) = capabilities.capability("object-format").and_then(|c| c.value())
-        {
-            let object_format = object_format.to_str().map_err(|_| Error::UnknownObjectFormat {
-                format: object_format.into(),
-            })?;
-            match object_format {
-                "sha1" => gix_hash::Kind::Sha1,
-                unknown => return Err(Error::UnknownObjectFormat { format: unknown.into() }),
-            }
-        } else {
-            gix_hash::Kind::Sha1
-        };
-
         Ok(Self {
             mappings,
             refspecs: fetch_refspecs,
@@ -108,5 +86,26 @@ impl RefMap {
             remote_refs,
             object_hash,
         })
+    }
+}
+
+/// Resolve the object format advertised by the server through the `object-format` capability.
+///
+/// When the capability is absent, the server is implicitly speaking Sha1 - older servers
+/// don't advertise it at all, and even newer ones may omit it for empty repositories.
+/// In builds whose `gix-hash` lacks the `sha1` feature, it's treated as unknown object format error.
+/// Errors include the object format bytes as `input` [metadata](gix_error::Error::metadata()).
+fn extract_object_hash(capabilities: &Capabilities) -> Result<gix_hash::Kind> {
+    let object_format = match capabilities.capability("object-format").and_then(|c| c.value()) {
+        Some(object_format) => object_format.to_str().or_raise(|| {
+            corruption("The object format used by the remote isn't valid UTF-8").with_input(object_format.as_bytes())
+        })?,
+        None => "sha1",
+    };
+    match object_format.parse::<gix_hash::Kind>() {
+        Ok(kind) => Ok(kind),
+        Err(err) => Err(message!("The object format used by the remote is unsupported: {err}")
+            .with_input(object_format.as_bytes())
+            .unsupported_error()),
     }
 }

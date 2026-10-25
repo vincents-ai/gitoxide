@@ -1,14 +1,33 @@
+use gix_testtools::TestResult;
 use std::path::Path;
 
 use gix_diff::Rewrites;
 use gix_merge::{
     commit::Options,
-    tree::{apply_index_entries::RemovalMode, treat_as_unresolved, TreatAsUnresolved},
+    tree::{TreatAsUnresolved, apply_index_entries::RemovalMode, treat_as_unresolved},
 };
 use gix_object::Write;
 use gix_worktree::stack::state::attributes;
 
 use crate::tree::baseline::Deviation;
+
+/// Keep the production fallback recoverable, but require every conflict exercised by these broad fixtures to have a
+/// concrete classification.
+fn assert_no_unknown_conflicts(outcome: &gix_merge::tree::Outcome<'_>, context: &str) {
+    for conflict in &outcome.conflicts {
+        let (resolution, _, _) = conflict.clone().into_parts_by_resolution();
+        assert!(
+            !matches!(
+                resolution,
+                Err(gix_merge::tree::ResolutionFailure::Unknown)
+                    | Ok(gix_merge::tree::Resolution::Forced(
+                        gix_merge::tree::ResolutionFailure::Unknown
+                    ))
+            ),
+            "{context}: all exercised conflict pairs should have a concrete classification: {conflict:#?}"
+        );
+    }
+}
 
 /// ### How to add a new baseline test
 ///
@@ -21,7 +40,7 @@ use crate::tree::baseline::Deviation;
 /// 5. Validate that all tests are still working, and adjust the expected number of cases
 ///    in the assertion that would then fail.
 #[test]
-fn run_baseline() -> crate::Result {
+fn run_baseline() -> TestResult {
     let root = gix_testtools::scripted_fixture_read_only("tree-baseline.sh")?;
     let cases = std::fs::read_to_string(root.join("baseline.cases"))?;
     let mut actual_cases = 0;
@@ -71,6 +90,7 @@ fn run_baseline() -> crate::Result {
             options.clone(),
         )?
         .tree_merge;
+        assert_no_unknown_conflicts(&actual, &case_name);
 
         let actual_id = actual.tree.write(|tree| odb.write(tree))?;
         match &deviation {
@@ -178,12 +198,13 @@ fn run_baseline() -> crate::Result {
                 options.clone(),
             )?
             .tree_merge;
+            assert_no_unknown_conflicts(&actual, &basename);
 
             let actual_id = actual.tree.write(|tree| odb.write(tree))?;
             if actual_id != expected_tree_id {
                 baseline::show_diff_trees_and_fail(&case_name, actual_id, &actual, expected_tree_id, &basename, &odb);
             }
-            if resolve_with_ours {
+            if resolve_with_ours && merge_info.conflicts.is_some() {
                 assert!(
                     !actual.has_unresolved_conflicts(conflicts_like_in_git),
                     "We have forcefully resolved all conflicts, as far as Git would be concerned\n{:#?}",
@@ -202,16 +223,74 @@ fn run_baseline() -> crate::Result {
     }
 
     assert_eq!(
-        actual_cases, 117,
+        actual_cases, 177,
         "BUG: update this number, and don't forget to remove a filter in the end"
     );
     assert_eq!(
-        skipped_tree_resolve_cases, 102,
+        skipped_tree_resolve_cases, 154,
         "this is done when no case is skipped, and we don't want to accidentally skip them.\
         Some don't actually have conflicts.\
         The ones we skipped don't have irreconcilable conflicts"
     );
 
+    Ok(())
+}
+
+#[test]
+fn unrelated_commits_require_explicit_permission() -> TestResult {
+    let root = gix_testtools::tempfile::TempDir::new()?;
+    let objects = gix_odb::memory::Proxy::new(gix_object::find::Never, gix_testtools::object_hash());
+    let tree_id = objects.write_buf(gix_object::Kind::Tree, b"")?;
+    let root_commit = |message: &str| {
+        objects.write_buf(
+            gix_object::Kind::Commit,
+            format!(
+                "tree {tree_id}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\n{message}\n"
+            )
+            .as_bytes(),
+        )
+    };
+    let our_commit_id = root_commit("ours")?;
+    let their_commit_id = root_commit("theirs")?;
+    let mut graph = gix_revwalk::Graph::new(&objects, None);
+    let mut diff_resource_cache = new_diff_resource_cache(root.path());
+    let mut blob_merge = new_blob_merge_platform(root.path(), 0);
+
+    for allow_missing_merge_base in [false, true] {
+        let result = gix_merge::commit(
+            our_commit_id,
+            their_commit_id,
+            Default::default(),
+            &mut graph,
+            &mut diff_resource_cache,
+            &mut blob_merge,
+            &objects,
+            &mut |id| id.to_hex_with_len(7).to_string(),
+            Options {
+                allow_missing_merge_base,
+                ..basic_merge_options()
+            },
+        );
+        if allow_missing_merge_base {
+            let out = result?;
+            assert!(out.merge_bases.is_none(), "the two root commits remain unrelated");
+            assert_eq!(
+                out.merge_base_tree_id, tree_id,
+                "an empty tree replaces the missing merge base"
+            );
+        } else {
+            let err = result.err().expect("the caller requires a common ancestor");
+            assert!(
+                err.is_validation(),
+                "the commit pair violates the requested ancestry contract"
+            );
+            assert_eq!(
+                err.to_string(),
+                format!("No common ancestor between {our_commit_id} and {their_commit_id}"),
+                "classification preserves the diagnostic"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -239,7 +318,12 @@ fn basic_merge_options() -> Options {
 fn new_diff_resource_cache(root: &Path) -> gix_diff::blob::Platform {
     gix_diff::blob::Platform::new(
         Default::default(),
-        gix_diff::blob::Pipeline::new(Default::default(), Default::default(), Vec::new(), Default::default()),
+        gix_diff::blob::Pipeline::new(
+            Default::default(),
+            gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
+            Vec::new(),
+            Default::default(),
+        ),
         Default::default(),
         gix_worktree::Stack::new(
             root,
@@ -269,7 +353,7 @@ fn new_blob_merge_platform(
     );
     let filter = gix_merge::blob::Pipeline::new(
         Default::default(),
-        gix_filter::Pipeline::default(),
+        gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
         gix_merge::blob::pipeline::Options {
             large_file_threshold_bytes: large_file_threshold_bytes.into().unwrap_or_default(),
         },
@@ -284,3 +368,4 @@ fn new_blob_merge_platform(
 }
 
 mod baseline;
+mod cartesian;

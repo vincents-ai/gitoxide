@@ -1,7 +1,7 @@
-use gix_testtools::{Creation, FixtureState, Result};
+use gix_testtools::{Creation, FixtureState, TestResult};
 
 #[test]
-fn rust_fixture_read_only_creates_and_caches_fixture() -> Result {
+fn rust_fixture_read_only_creates_and_caches_fixture() -> TestResult {
     // First call should create the fixture
     let (dir, (a, b, c)) = gix_testtools::rust_fixture_read_only("test_fixture_read_only", 1, |fixture| {
         let dir = fixture.path();
@@ -41,7 +41,7 @@ fn rust_fixture_read_only_creates_and_caches_fixture() -> Result {
 }
 
 #[test]
-fn rust_fixture_read_only_version_change_invalidates_cache() -> Result {
+fn rust_fixture_read_only_version_change_invalidates_cache() -> TestResult {
     // Create fixture with version 1
     let (dir1, _) = gix_testtools::rust_fixture_read_only("test_fixture_version", 1, |fixture| {
         if let FixtureState::Uninitialized(dir) = fixture {
@@ -71,7 +71,7 @@ fn rust_fixture_read_only_version_change_invalidates_cache() -> Result {
 }
 
 #[test]
-fn rust_fixture_writable() -> Result {
+fn rust_fixture_writable() -> TestResult {
     for creation in [Creation::CopyFromReadOnly, Creation::Execute] {
         let (tmp, _) = gix_testtools::rust_fixture_writable("test_fixture_writable_copy", 1, creation, |fixture| {
             if let FixtureState::Uninitialized(dir) = fixture {
@@ -101,33 +101,6 @@ fn rust_fixture_closure_error_propagates() {
         Err::<(), _>("intentional error".into())
     });
 
-    let err_msg = res.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("intentional error"),
-        "Error message should contain the original error, got: {err_msg}"
-    );
-}
-
-#[test]
-fn rust_fixture_standalone_uses_fixtures_directory() -> Result {
-    let (dir, _) = gix_testtools::rust_fixture_read_only_standalone("test_fixture_standalone", 1, |fixture| {
-        if let FixtureState::Uninitialized(dir) = fixture {
-            std::fs::write(dir.join("standalone.txt"), "standalone")?;
-        }
-        Ok(())
-    })?;
-
-    // Standalone fixtures are stored in fixtures/generated-do-not-edit, not tests/fixtures/...
-    let dir_str = dir.to_string_lossy();
-    assert!(
-        dir_str.contains("fixtures") && dir_str.contains("generated-do-not-edit"),
-        "Standalone fixture should be in fixtures/generated-do-not-edit directory, got: {dir_str}"
-    );
-    assert!(
-        !dir_str.contains("tests/fixtures"),
-        "Standalone fixture should NOT be in tests/fixtures directory, got: {dir_str}"
-    );
-
-    assert!(dir.join("standalone.txt").exists());
-    Ok(())
+    let err = res.expect_err("the fixture closure failed");
+    insta::assert_debug_snapshot!(err, "fixture setup preserves the closure's error", @r#""intentional error""#);
 }

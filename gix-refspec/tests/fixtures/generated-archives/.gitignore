@@ -1,2 +1,12 @@
+# The fixture captures `baseline.git` files from
+# `git fetch --refmap= --dry-run -v origin <spec>` output. That textual format
+# may change between git versions, so the baseline must be produced by the host's
+# `git` to keep the comparison meaningful. Both SHA-1 and SHA-256 variants
+# share this constraint.
 /match_baseline.tar
 /match_baseline_sha256.tar
+
+# Reverse lookup baselines should also reflect the host Git's behavior, rather
+# than freezing it together with copies of every case repository and template.
+/reverse_baseline.tar
+/reverse_baseline_sha256.tar

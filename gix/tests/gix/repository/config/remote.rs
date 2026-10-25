@@ -1,15 +1,13 @@
-use std::borrow::Cow;
-
-use gix::bstr::BStr;
+use gix::bstr::BString;
 
 use crate::remote;
 
-fn remote_names<'a>(it: impl IntoIterator<Item = &'a str>) -> Vec<Cow<'a, BStr>> {
-    it.into_iter().map(|n| Cow::Borrowed(n.into())).collect()
+fn remote_names<'a>(it: impl IntoIterator<Item = &'a str>) -> Vec<BString> {
+    it.into_iter().map(Into::into).collect()
 }
 
-fn remote_name(name: &str) -> Cow<'_, BStr> {
-    Cow::Borrowed(name.into())
+fn remote_name(name: &str) -> BString {
+    name.into()
 }
 
 #[test]
@@ -55,16 +53,18 @@ fn remote_default_name() {
 
 mod branch_remote {
     use gix::{config::tree::Push, remote};
+    use gix_testtools::TestResult;
 
     use crate::util::named_subrepo_opts;
 
     mod name {
         use gix::remote;
+        use gix_testtools::TestResult;
 
         use crate::repository::config::remote::branch_remote::repo;
 
         #[test]
-        fn push() -> crate::Result {
+        fn push() -> TestResult {
             {
                 let repo = repo("push-remote")?;
 
@@ -92,31 +92,25 @@ mod branch_remote {
     }
 
     #[test]
-    fn fetch() -> crate::Result {
+    fn fetch() -> TestResult {
         let repo = repo("fetch")?;
 
         assert_eq!(
             repo.branch_remote_ref_name("refs/heads/main".try_into()?, remote::Direction::Fetch)
-                .expect("Remote Merge ref exists")
-                .expect("Remote Merge ref is valid")
+                .expect("Remote Merge ref exists")?
                 .shorten(),
             "main"
         );
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/main".try_into()?, remote::Direction::Fetch)
-                .expect("Remote Merge ref exists")
-                .expect("Remote Merge ref is valid")
-                .as_bstr(),
+                .expect("Remote Merge ref exists")?,
             "refs/remotes/remote_repo/main"
         );
         let (upstream, remote_name) = repo
             .upstream_branch_and_remote_for_tracking_branch("refs/remotes/remote_repo/main".try_into()?)?
             .expect("mapping exists");
-        assert_eq!(upstream.as_bstr(), "refs/heads/main");
-        assert_eq!(
-            remote_name.name().expect("non-anonymous remote").as_bstr(),
-            "remote_repo"
-        );
+        assert_eq!(upstream, "refs/heads/main");
+        assert_eq!(remote_name.name().expect("non-anonymous remote"), "remote_repo");
 
         assert_eq!(
             repo.upstream_branch_and_remote_for_tracking_branch("refs/remotes/missing-remote/main".try_into()?)?,
@@ -126,41 +120,35 @@ mod branch_remote {
 
         for direction in [remote::Direction::Fetch, remote::Direction::Push] {
             assert_eq!(
-                repo.branch_remote_name("main", direction)
-                    .expect("Remote name exists")
-                    .as_ref(),
+                repo.branch_remote_name("main", direction).expect("Remote name exists"),
                 "remote_repo"
             );
             assert_eq!(
                 repo.branch_remote_name("broken", direction)
-                    .expect("Remote name exists")
-                    .as_ref(),
+                    .expect("Remote name exists"),
                 "remote_repo"
             );
         }
 
         assert_eq!(
             repo.branch_remote_ref_name("refs/heads/broken".try_into()?, remote::Direction::Fetch)
-                .expect("Remote Merge ref exists")
-                .expect("merge ref is turned into a full-name")
-                .as_bstr(),
+                .expect("Remote Merge ref exists")?,
             "refs/heads/not_a_valid_merge_ref",
             "short names are simply turned into branch names - this doesn't always work, but sometimes."
         );
-        assert!(repo
-            .branch_remote_ref_name("refs/heads/missing".try_into()?, remote::Direction::Fetch)
-            .is_none());
+        assert!(
+            repo.branch_remote_ref_name("refs/heads/missing".try_into()?, remote::Direction::Fetch)
+                .is_none()
+        );
         for direction in [remote::Direction::Fetch, remote::Direction::Push] {
             assert_eq!(
-                repo.branch_remote_name("broken", direction).expect("is set").as_bstr(),
+                repo.branch_remote_name("broken", direction).expect("is set"),
                 "remote_repo"
             );
         }
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/broken".try_into()?, remote::Direction::Fetch)
-                .expect("no error")
-                .expect("valid result")
-                .as_bstr(),
+                .expect("no error")?,
             "refs/remotes/remote_repo/not_a_valid_merge_ref",
             "the merge ref is broken, but we turned it into a full ref name from which everything else was derived",
         );
@@ -169,8 +157,8 @@ mod branch_remote {
     }
 
     #[test]
-    fn upstream_branch_and_remote_name_for_tracking_branch() -> crate::Result {
-        let repo = repo("multiple-remotes")?;
+    fn upstream_branch_and_remote_name_for_tracking_branch() -> TestResult {
+        let mut repo = repo("multiple-remotes")?;
         for expected_remote_name in ["other", "with/two"] {
             let (upstream, remote) = repo
                 .upstream_branch_and_remote_for_tracking_branch(
@@ -179,32 +167,105 @@ mod branch_remote {
                         .try_into()?,
                 )?
                 .expect("mapping exists");
-            assert_eq!(remote.name().expect("named remote").as_bstr(), expected_remote_name);
-            assert_eq!(upstream.as_bstr(), "refs/heads/main");
+            assert_eq!(remote.name().expect("named remote"), expected_remote_name);
+            assert_eq!(upstream, "refs/heads/main");
         }
         let err = repo
             .upstream_branch_and_remote_for_tracking_branch("refs/remotes/with/two/slashes/main".try_into()?)
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Found ambiguous remotes without 1:1 mapping or more than one match: with/two, with/two/slashes",
-            "we aren't very specific report an error just like Git does in case of multi-remote ambiguity"
-        );
+            .expect_err("both remotes reverse-map the tracking branch");
+        insta::assert_debug_snapshot!(err, "the name is ambiguous because both remotes have fetch refspecs mapping to it", @"Found ambiguous remotes without 1:1 mapping or more than one match: with/two, with/two/slashes");
 
         let (upstream, remote) = repo
             .upstream_branch_and_remote_for_tracking_branch("refs/remotes/with/two/special".try_into()?)?
             .expect("mapping exists");
-        assert_eq!(remote.name().expect("non-anonymous remote").as_bstr(), "with/two");
+        assert_eq!(remote.name().expect("non-anonymous remote"), "with/two");
         assert_eq!(
-            upstream.as_bstr(),
-            "refs/heads/special",
+            upstream, "refs/heads/special",
             "it finds a single mapping even though there are two refspecs"
+        );
+
+        repo.config_snapshot_mut().append_config(
+            [
+                "remote.prefix.url=../fetch",
+                "remote.prefix.fetch=+refs/heads/*:refs/remotes/prefix/unrelated/*",
+                "remote.fallback.url=../fetch",
+                "remote.fallback.fetch=+refs/heads/*:refs/remotes/prefix/*",
+            ],
+            gix_config::Source::Api,
+        )?;
+        let (upstream, remote) = repo
+            .upstream_branch_and_remote_for_tracking_branch("refs/remotes/prefix/main".try_into()?)?
+            .expect("a remote maps the tracking branch");
+        assert_eq!(upstream.as_bstr(), "refs/heads/main");
+        assert_eq!(
+            remote.name().expect("named remote"),
+            "fallback",
+            "a matching remote-name prefix does not override the actual refspec mapping"
+        );
+
+        repo.config_snapshot_mut().append_config(
+            [
+                "remote.also-fallback.url=../fetch",
+                "remote.also-fallback.fetch=+refs/heads/*:refs/remotes/prefix/*",
+            ],
+            gix_config::Source::Api,
+        )?;
+        let err = repo
+            .upstream_branch_and_remote_for_tracking_branch("refs/remotes/prefix/main".try_into()?)
+            .expect_err("multiple remotes are ambiguous");
+        insta::assert_debug_snapshot!(err, "all remotes mapping the same tracking branch are reported", @"Found ambiguous remotes without 1:1 mapping or more than one match: also-fallback, fallback");
+        Ok(())
+    }
+
+    #[test]
+    fn upstream_reverse_mapping_preserves_sources_and_matches_destinations_literally() -> TestResult {
+        let repo = |name| {
+            named_subrepo_opts(
+                "make_remote_reverse_mapping_repos.sh",
+                name,
+                gix::open::Options::isolated(),
+            )
+        };
+        let tracking_branch = "refs/remotes/origin/main".try_into()?;
+        for (name, expected) in [
+            ("full-source", Some("refs/heads/main")),
+            ("partial-source", Some("heads/main")),
+            ("head-source", Some("HEAD")),
+            ("short-source", None),
+            ("object-id-source", None),
+        ] {
+            let repo = repo(name)?;
+            let result = repo.upstream_branch_and_remote_for_tracking_branch(tracking_branch);
+            if let Some(expected) = expected {
+                let (upstream, remote) = result?.expect("the full destination matches");
+                assert_eq!(
+                    upstream.as_bstr(),
+                    expected,
+                    "the parsed source isn't expanded into a branch"
+                );
+                assert_eq!(
+                    remote.name().expect("named remote"),
+                    "origin",
+                    "the source belongs to origin"
+                );
+            } else {
+                assert!(
+                    result.is_err(),
+                    "the source in `{name}` cannot be turned into a full reference name offline"
+                );
+            }
+        }
+        let repo = repo("abbreviated-destination")?;
+        assert!(
+            repo.upstream_branch_and_remote_for_tracking_branch(tracking_branch)?
+                .is_none(),
+            "an abbreviated destination doesn't match a full tracking-reference name"
         );
         Ok(())
     }
 
     #[test]
-    fn push_default() -> crate::Result {
+    fn push_default() -> TestResult {
         let repo = repo("fetch")?;
 
         assert_eq!(
@@ -218,15 +279,15 @@ mod branch_remote {
         for direction in [remote::Direction::Fetch, remote::Direction::Push] {
             assert_eq!(
                 repo.branch_remote_tracking_ref_name("refs/heads/main".try_into()?, direction)
-                    .expect("exists")?
-                    .as_bstr(),
+                    .expect("exists")?,
                 "refs/remotes/remote_repo/main",
                 "this is a 'simple' mapping of an existing branch, using push.default=simple and the default refspec"
             );
         }
 
         assert!(
-            repo.branch_remote_tracking_ref_name("refs/heads/broken".try_into()?, remote::Direction::Push).is_none(),
+            repo.branch_remote_tracking_ref_name("refs/heads/broken".try_into()?, remote::Direction::Push)
+                .is_none(),
             "push.default = simple, hence we need to verify the merge-branch is the same as us, and retrieving it succeeds due to auto-fullnamification but then it doesn't match",
         );
 
@@ -234,7 +295,7 @@ mod branch_remote {
     }
 
     #[test]
-    fn push_mapped() -> crate::Result {
+    fn push_mapped() -> TestResult {
         let repo = repo("push-mapped")?;
 
         assert_eq!(
@@ -247,15 +308,13 @@ mod branch_remote {
 
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/main".try_into()?, remote::Direction::Push)
-                .expect("exists")?
-                .as_bstr(),
+                .expect("exists")?,
             "refs/remotes/origin/remapped-main",
             "the first matching push-spec maps the branch to another head, then it's mapped with fetch-specs"
         );
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/main".try_into()?, remote::Direction::Fetch)
-                .expect("exists")?
-                .as_bstr(),
+                .expect("exists")?,
             "refs/remotes/origin/main",
             "push.simple is set (or the default), hence it's a one-one mapping along with the standard refspec"
         );
@@ -278,15 +337,13 @@ mod branch_remote {
 
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/feature".try_into()?, remote::Direction::Push)
-                .expect("exists")?
-                .as_bstr(),
+                .expect("exists")?,
             "refs/remotes/origin/remapped-feature",
             "this branch is mapped with push-specs, then it's mapped with fetch-specs as well"
         );
         assert_eq!(
             repo.branch_remote_tracking_ref_name("refs/heads/feature".try_into()?, remote::Direction::Fetch)
-                .expect("exists")?
-                .as_bstr(),
+                .expect("exists")?,
             "refs/remotes/origin/main",
             "remapping by branch.feature.merge=main, then mapped by refspec"
         );
@@ -295,7 +352,7 @@ mod branch_remote {
     }
 
     #[test]
-    fn push_missing() -> crate::Result {
+    fn push_missing() -> TestResult {
         let repo = repo("push-missing")?;
 
         assert!(
@@ -322,7 +379,7 @@ mod branch_remote {
     }
 
     #[test]
-    fn push_default_current() -> crate::Result {
+    fn push_default_current() -> TestResult {
         let mut repo = repo("push-default-current")?;
 
         for same_name_default in ["current", "matching"] {
@@ -362,7 +419,8 @@ mod branch_remote {
 
         repo.config_snapshot_mut().set_value(&Push::DEFAULT, "simple")?;
         assert_eq!(
-            repo.branch_remote_ref_name("refs/heads/main".try_into()?, remote::Direction::Push).transpose()?,
+            repo.branch_remote_ref_name("refs/heads/main".try_into()?, remote::Direction::Push)
+                .transpose()?,
             None,
             "simple requires that the upstream matches the current branch, which isn't the case as `branch.main.merge` points to 'other'"
         );
@@ -374,7 +432,7 @@ mod branch_remote {
         Ok(())
     }
 
-    fn repo(name: &str) -> Result<gix::Repository, gix::open::Error> {
+    fn repo(name: &str) -> std::result::Result<gix::Repository, gix_error::Error> {
         named_subrepo_opts("make_remote_config_repos.sh", name, gix::open::Options::isolated())
     }
 }

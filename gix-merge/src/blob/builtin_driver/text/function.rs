@@ -1,15 +1,15 @@
 use std::ops::Range;
 
 use crate::blob::{
-    builtin_driver::text::{
-        utils::{
-            assure_ends_with_nl, collect_hunks, contains_lines, detect_line_ending, detect_line_ending_or_nl,
-            fill_ancestor, hunks_differ_in_diff3, take_intersecting, tokens, write_ancestor, write_conflict_marker,
-            write_hunks, zealously_contract_hunks, Hunk, Side,
-        },
-        Conflict, ConflictStyle, Labels, Merge, Options,
-    },
     Resolution,
+    builtin_driver::text::{
+        Conflict, ConflictStyle, Labels, Merge, Options,
+        utils::{
+            Hunk, Side, assure_ends_with_nl, collect_hunks, contains_lines, detect_line_ending,
+            detect_line_ending_or_nl, fill_ancestor, hunks_differ_in_diff3, take_intersecting, tokens, write_ancestor,
+            write_conflict_marker, write_hunks, zealously_contract_hunks,
+        },
+    },
 };
 
 impl<'input, 'data> Merge<'input, 'data> {
@@ -243,7 +243,6 @@ impl<'input, 'data> Merge<'input, 'data> {
 ///
 /// *The caller* is responsible for clearing `input`, otherwise tokens will accumulate.
 /// This idea is to save time if the input is known to be very similar.
-#[allow(clippy::too_many_arguments)]
 pub fn merge<'a>(
     out: &mut Vec<u8>,
     input: &mut imara_diff::InternedInput<&'a [u8]>,

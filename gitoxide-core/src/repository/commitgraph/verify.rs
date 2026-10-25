@@ -10,10 +10,12 @@ pub struct Context<W1: std::io::Write, W2: std::io::Write> {
 }
 
 pub(crate) mod function {
+    use gix::Result;
+    #[cfg(feature = "serde")]
+    use gix::error::ResultExt;
     use std::io;
 
-    use crate::{repository::commitgraph::verify::Context, OutputFormat};
-    use anyhow::Result;
+    use crate::{OutputFormat, repository::commitgraph::verify::Context};
 
     pub fn verify<W1, W2>(
         repo: gix::Repository,
@@ -29,7 +31,7 @@ pub(crate) mod function {
     {
         let g = repo.commit_graph()?;
 
-        #[allow(clippy::unnecessary_wraps, unknown_lints)]
+        #[expect(clippy::unnecessary_wraps)]
         fn noop_processor(_commit: &gix::commitgraph::file::Commit<'_>) -> std::result::Result<(), std::fmt::Error> {
             Ok(())
         }
@@ -39,7 +41,7 @@ pub(crate) mod function {
         match output_statistics {
             Some(OutputFormat::Human) => drop(print_human_output(&mut out, &stats)),
             #[cfg(feature = "serde")]
-            Some(OutputFormat::Json) => serde_json::to_writer_pretty(out, &stats)?,
+            Some(OutputFormat::Json) => serde_json::to_writer_pretty(out, &stats).or_error()?,
             _ => {}
         }
 

@@ -3,13 +3,13 @@ name = "gix-url-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-anyhow = "1.0.76"
+gix-error = { path = "../../gix-error" }
 libfuzzer-sys = "0.4"
 
 [dependencies.gix-url]

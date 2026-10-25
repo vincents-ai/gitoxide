@@ -4,8 +4,8 @@
 use std::fmt::{self, Display};
 use std::hash::Hash;
 
-use crate::intern::{InternedInput, Interner, Token};
 use crate::Diff;
+use crate::intern::{InternedInput, Interner, Token};
 
 impl Diff {
     /// Creates a unified diff output that can be formatted as a string.
@@ -168,7 +168,7 @@ impl<T: EndsWithNewline + Hash + Eq + Display + ?Sized> UnifiedDiffPrinter for B
     }
 
     fn display_context_token(&self, mut f: impl fmt::Write, token: Token) -> fmt::Result {
-        write!(f, " {}", &self.0[token])?;
+        write!(f, " {}", self.0[token])?;
         if !&self.0[token].ends_with_newline() {
             writeln!(f)?;
         }

@@ -1,4 +1,8 @@
 use gix_hash::ObjectId;
+pub use gix_testtools::{
+    scripted_fixture_read_only, scripted_fixture_read_only_with_args, scripted_fixture_writable,
+    scripted_fixture_writable_with_args,
+};
 
 pub fn hex_to_id(hex: &str) -> ObjectId {
     match fixture_hash_kind() {
@@ -15,7 +19,7 @@ pub fn sha1_hex_to_id(hex: &str) -> ObjectId {
 }
 
 pub fn fixture_hash_kind() -> gix_hash::Kind {
-    gix_testtools::hash_kind_from_env().unwrap_or_default()
+    gix_testtools::object_hash()
 }
 
 fn translate_sha1_to_fixture_sha256(hex: &str) -> String {
@@ -59,15 +63,17 @@ fn translate_sha1_to_fixture_sha256(hex: &str) -> String {
 
 pub use gix_testtools::Result;
 
+mod equality;
+mod error;
 mod file;
 mod fullname;
 mod partialname {
     use gix_ref::PartialName;
 
     #[test]
-    fn join() -> crate::Result {
+    fn join() -> gix_testtools::TestResult {
         let pn = PartialName::try_from("no-trailing-slash")?;
-        assert_eq!(pn.join("name".into())?.as_ref().as_bstr(), "no-trailing-slash/name");
+        assert_eq!(pn.join("name".into())?, "no-trailing-slash/name");
 
         let err = PartialName::try_from("trailing-slash/").unwrap_err();
         assert!(
@@ -96,5 +102,4 @@ mod partialname {
 mod namespace;
 mod packed;
 mod reference;
-mod store;
 mod transaction;

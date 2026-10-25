@@ -1,18 +1,20 @@
-#![allow(clippy::join_absolute_paths)]
+#![expect(clippy::join_absolute_paths)]
+use crate::TestResult;
+use gix_error::classify;
 use std::path::{Path, PathBuf};
 
 use gix_fs::Stack;
 
 #[derive(Debug, Default, Eq, PartialEq)]
 struct Record {
-    push_dir: usize,
+    push_dir_count: usize,
     dirs: Vec<PathBuf>,
     push: usize,
 }
 
 impl gix_fs::stack::Delegate for Record {
     fn push_directory(&mut self, stack: &Stack) -> std::io::Result<()> {
-        self.push_dir += 1;
+        self.push_dir_count += 1;
         self.dirs.push(stack.current().into());
         Ok(())
     }
@@ -24,6 +26,39 @@ impl gix_fs::stack::Delegate for Record {
 
     fn pop_directory(&mut self) {
         self.dirs.pop();
+    }
+}
+
+#[derive(Default)]
+struct FailOnce {
+    directory_to_fail_on: Option<PathBuf>,
+    path_to_fail_on: Option<PathBuf>,
+    failed: bool,
+    directories: Vec<PathBuf>,
+    popped_directories: Vec<PathBuf>,
+}
+
+impl gix_fs::stack::Delegate for FailOnce {
+    fn push_directory(&mut self, stack: &Stack) -> std::io::Result<()> {
+        if !self.failed && self.directory_to_fail_on.as_deref() == Some(stack.current_relative()) {
+            self.failed = true;
+            return Err(std::io::Error::other("failed to push directory"));
+        }
+        self.directories.push(stack.current_relative().to_owned());
+        Ok(())
+    }
+
+    fn push(&mut self, _is_last_component: bool, stack: &Stack) -> std::io::Result<()> {
+        if !self.failed && self.path_to_fail_on.as_deref() == Some(stack.current_relative()) {
+            self.failed = true;
+            return Err(std::io::Error::other("failed to push"));
+        }
+        Ok(())
+    }
+
+    fn pop_directory(&mut self) {
+        self.popped_directories
+            .push(self.directories.pop().expect("directory to pop"));
     }
 }
 
@@ -191,26 +226,27 @@ fn empty_paths_are_noop_if_no_path_was_pushed_before() {
 }
 
 #[test]
-fn relative_components_are_invalid() {
+fn relative_components_are_invalid() -> TestResult {
     let root = PathBuf::from(".");
     let mut s = Stack::new(root.clone());
 
     let mut r = Record::default();
-    let err = s.make_relative_path_current(p("a/.."), &mut r).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        format!(
-            "Input path {input:?} contains relative or absolute components",
-            input = "a/.."
-        )
-    );
+    let err = s
+        .make_relative_path_current(p("a/.."), &mut r)
+        .expect_err("parent components are forbidden");
+    assert!(classify(&err).is_validation(), "the I/O wrapper retains the cause");
+    insta::assert_debug_snapshot!(err, "relative components are invalid", @r#"
+    Custom {
+        kind: Other,
+        error: Input path "a/.." contains relative or absolute components,
+    }
+    "#);
 
-    s.make_relative_path_current(p("a/./b"), &mut r)
-        .expect("dot is ignored");
+    s.make_relative_path_current(p("a/./b"), &mut r)?;
     assert_eq!(
         r,
         Record {
-            push_dir: 2,
+            push_dir_count: 2,
             dirs: vec![".".into(), "./a".into()],
             push: 2,
         },
@@ -221,31 +257,42 @@ fn relative_components_are_invalid() {
         if cfg!(windows) { r".\a\b" } else { "./a/b" },
         "dot is silently ignored"
     );
-    s.make_relative_path_current(p("a//b/"), &mut r)
-        .expect("multiple-slashes are ignored");
+    s.make_relative_path_current(p("a//b/"), &mut r)?;
     assert_eq!(
         r,
         Record {
-            push_dir: 2,
+            push_dir_count: 2,
             dirs: vec![".".into(), "./a".into()],
-            push: 2,
+            push: 3,
         },
-        "nothing changed"
+        "the terminal component is validated again, but its parent stays cached"
     );
+    let err = s
+        .make_relative_path_current(p("a/.."), &mut r)
+        .expect_err("parent components are also forbidden when reusing a path prefix");
+    insta::assert_debug_snapshot!(err, "peeked errors retain their cause too", @r#"
+    Custom {
+        kind: Other,
+        error: Input path "a/.." contains relative or absolute components,
+    }
+    "#);
+    assert!(classify(&err).is_validation(), "peeked errors retain their cause too");
+    Ok(())
 }
 
 #[test]
-fn absolute_paths_are_invalid() -> crate::Result {
+fn absolute_paths_are_invalid() -> TestResult {
     let root = PathBuf::from(".");
     let mut s = Stack::new(root.clone());
 
     let mut r = Record::default();
     let err = s.make_relative_path_current(p("/"), &mut r).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        r#"Input path "/" contains relative or absolute components"#,
-        "a leading slash is always considered absolute"
-    );
+    insta::assert_debug_snapshot!(err, "a leading slash is always considered absolute", @r#"
+    Custom {
+        kind: Other,
+        error: Input path "/" contains relative or absolute components,
+    }
+    "#);
     s.make_relative_path_current("/", &mut r)?;
     assert_eq!(
         s.current(),
@@ -254,11 +301,12 @@ fn absolute_paths_are_invalid() -> crate::Result {
     );
 
     let err = s.make_relative_path_current("../breakout", &mut r).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        r#"Input path "../breakout" contains relative or absolute components"#,
-        "otherwise breakout attempts are detected"
-    );
+    insta::assert_debug_snapshot!(err, "otherwise breakout attempts are detected", @r#"
+    Custom {
+        kind: Other,
+        error: Input path "../breakout" contains relative or absolute components,
+    }
+    "#);
     s.make_relative_path_current(p("a/"), &mut r)?;
     assert_eq!(
         s.current(),
@@ -274,26 +322,14 @@ fn absolute_paths_are_invalid() -> crate::Result {
 
     #[cfg(windows)]
     {
+        let mut error_snapshots = Vec::new();
         let err = s.make_relative_path_current(Path::new(r"\"), &mut r).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            r#"Input path "\" contains relative or absolute components"#,
-            "on Windows, backslashes are considered absolute and replace the base if it is relative, \
-            hence they are forbidden."
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
 
         let err = s.make_relative_path_current(Path::new("c:"), &mut r).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            r#"Input path "c:" contains relative or absolute components"#,
-            "on Windows, drive-letters without trailing backslash or slash are also absolute (even though they ought to be relative)"
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
         let err = s.make_relative_path_current(Path::new(r"c:\"), &mut r).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            r#"Input path "c:\" contains relative or absolute components"#,
-            "on Windows, drive-letters are absolute, which is expected"
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
 
         s.make_relative_path_current(Path::new("֍:"), &mut r)?;
         assert_eq!(
@@ -305,26 +341,42 @@ fn absolute_paths_are_invalid() -> crate::Result {
         let err = s
             .make_relative_path_current(Path::new(r"\\localhost\hello"), &mut r)
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            r#"Input path "\\localhost\hello" contains relative or absolute components"#,
-            "there is UNC paths as well"
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
 
         let err = s
             .make_relative_path_current(Path::new(r#"\\?\C:"#), &mut r)
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            r#"Input path "\\?\C:" contains relative or absolute components"#,
-            "there is UNC paths as well, sometimes they look different"
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+        insta::assert_debug_snapshot!(error_snapshots, "Windows absolute paths cannot escape the stack root", @r#"
+        [
+            Custom {
+                kind: Other,
+                error: Input path "\" contains relative or absolute components,
+            },
+            Custom {
+                kind: Other,
+                error: Input path "c:" contains relative or absolute components,
+            },
+            Custom {
+                kind: Other,
+                error: Input path "c:\" contains relative or absolute components,
+            },
+            Custom {
+                kind: Other,
+                error: Input path "\\localhost\hello" contains relative or absolute components,
+            },
+            Custom {
+                kind: Other,
+                error: Input path "\\?\C:" contains relative or absolute components,
+            },
+        ]
+        "#);
     }
     Ok(())
 }
 
 #[test]
-fn delegate_calls_are_consistent() -> crate::Result {
+fn delegate_calls_are_consistent() -> TestResult {
     let root = PathBuf::from(".");
     let mut s = Stack::new(root.clone());
 
@@ -337,7 +389,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 2,
+            push_dir_count: 2,
             dirs: dirs.clone(),
             push: 2,
         },
@@ -348,7 +400,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 2,
+            push_dir_count: 2,
             dirs: dirs.clone(),
             push: 3,
         },
@@ -361,7 +413,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 4,
+            push_dir_count: 4,
             dirs: dirs.clone(),
             push: 6,
         },
@@ -373,7 +425,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 5,
+            push_dir_count: 5,
             dirs: dirs.clone(),
             push: 8,
         },
@@ -386,7 +438,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 5,
+            push_dir_count: 5,
             dirs: dirs.clone(),
             push: 9,
         },
@@ -398,7 +450,7 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 6,
+            push_dir_count: 6,
             dirs: dirs.clone(),
             push: 11,
         },
@@ -410,11 +462,11 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 7,
+            push_dir_count: 7,
             dirs: dirs.clone(),
-            push: 12,
+            push: 13,
         },
-        "and another sub-directory is added"
+        "and another sub-directory is added after revalidating the cached leaf as a directory"
     );
 
     dirs.push(root.join("x").join("z").join("a"));
@@ -423,46 +475,47 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 9,
+            push_dir_count: 9,
             dirs: dirs.clone(),
-            push: 14,
+            push: 16,
         },
-        "and more subdirectories, two at once this time."
+        "and more subdirectories, two at once this time, after revalidating the cached leaf as a directory."
     );
 
-    dirs.drain(1 /*root*/ + 1 /*x*/ + 1 /*x/z*/ ..).count();
+    dirs.drain(1 /*root*/ + 1 /*x*/ ..).count();
     s.make_relative_path_current("x/z", &mut r)?;
     assert_eq!(
         r,
         Record {
-            push_dir: 9,
+            push_dir_count: 9,
             dirs: dirs.clone(),
-            push: 14,
+            push: 17,
         },
-        "this only pops components, and as x/z/a/ was previously a directory, x/z is still a directory"
+        "the former directory is popped and validated as a terminal component"
     );
     assert_eq!(
         dirs.last(),
-        Some(&PathBuf::from("./x/z")),
-        "the stack is state so keeps thinking it's a directory which is consistent. Git does it differently though."
+        Some(&PathBuf::from("./x")),
+        "only leading directories remain cached, as the caller may replace the terminal entry"
     );
 
     let err = s.make_relative_path_current(p(""), &mut r).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "empty inputs are not allowed",
-        "this is to protect us from double-counting the root path next time a component is pushed, \
-        and besides that really shouldn't happen"
-    );
+    insta::assert_debug_snapshot!(err, "this is to protect us from double-counting the root path next time a component is pushed, \
+        and besides that really shouldn't happen", @r#"
+    Custom {
+        kind: Other,
+        error: "empty inputs are not allowed",
+    }
+    "#);
 
     s.make_relative_path_current("leaf", &mut r)?;
     dirs.drain(1..).count();
     assert_eq!(
         r,
         Record {
-            push_dir: 9,
+            push_dir_count: 9,
             dirs: dirs.clone(),
-            push: 15,
+            push: 18,
         },
         "reset as much as possible, with just a leaf-component and the root directory"
     );
@@ -472,9 +525,9 @@ fn delegate_calls_are_consistent() -> crate::Result {
     assert_eq!(
         r,
         Record {
-            push_dir: 10,
+            push_dir_count: 10,
             dirs: dirs.clone(),
-            push: 17,
+            push: 20,
         },
         "double-slashes are automatically cleaned, even though they shouldn't happen, it's not forbidden"
     );
@@ -487,36 +540,36 @@ fn delegate_calls_are_consistent() -> crate::Result {
         assert_eq!(
             r,
             Record {
-                push_dir: 11,
+                push_dir_count: 11,
                 dirs: dirs.clone(),
-                push: 19,
+                push: 22,
             },
             "a backslash is a normal character outside of Windows, so it's fine to have it as component"
         );
 
         s.make_relative_path_current(r"\", &mut r)?;
+        dirs.pop();
         assert_eq!(
             r,
             Record {
-                push_dir: 11,
+                push_dir_count: 11,
                 dirs: dirs.clone(),
-                push: 19,
+                push: 23,
             },
         );
         assert_eq!(
             s.current().to_string_lossy(),
             r"./\",
-            r"a backslash can also be a valid leaf component - here we only popped the 'b', leaving the \ 'directory'"
+            r"a backslash can also be a valid leaf component, so it is no longer cached as a directory"
         );
 
         s.make_relative_path_current(r"\\", &mut r)?;
-        dirs.pop();
         assert_eq!(
             r,
             Record {
-                push_dir: 11,
+                push_dir_count: 11,
                 dirs: dirs.clone(),
-                push: 20,
+                push: 24,
             },
         );
         assert_eq!(
@@ -534,9 +587,9 @@ fn delegate_calls_are_consistent() -> crate::Result {
         assert_eq!(
             r,
             Record {
-                push_dir: 11,
+                push_dir_count: 11,
                 dirs: dirs.clone(),
-                push: 19,
+                push: 22,
             },
         );
         assert_eq!(
@@ -546,5 +599,113 @@ fn delegate_calls_are_consistent() -> crate::Result {
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn failed_directory_to_leaf_transition_does_not_keep_directory_state() -> TestResult {
+    let mut s = Stack::new(PathBuf::from("."));
+    let mut r = FailOnce::default();
+    s.make_relative_path_current("x/z/a", &mut r)?;
+    r.path_to_fail_on = Some(PathBuf::from("x/z"));
+
+    let err = s
+        .make_relative_path_current("x/z", &mut r)
+        .expect_err("a cached directory must also be validated as a terminal entry");
+    insta::assert_debug_snapshot!(err, "failed directory to leaf transition does not keep directory state", @r#"
+    Custom {
+        kind: Other,
+        error: "failed to push",
+    }
+    "#);
+    assert_eq!(
+        r.directories,
+        [PathBuf::from(""), PathBuf::from("x")],
+        "the failed terminal validation must not retain directory state"
+    );
+
+    s.make_relative_path_current("x/z/b", &mut r)?;
+    assert_eq!(
+        r.directories,
+        [PathBuf::from(""), PathBuf::from("x"), PathBuf::from("x/z")],
+        "retrying as a parent revalidates and pushes the directory again"
+    );
+    Ok(())
+}
+
+#[test]
+fn failed_leaf_to_directory_transition_restores_leaf_state() -> TestResult {
+    let mut s = Stack::new(PathBuf::from("."));
+    let mut r = FailOnce {
+        directory_to_fail_on: Some(PathBuf::from("x/z")),
+        ..Default::default()
+    };
+
+    s.make_relative_path_current("x/z", &mut r)?;
+    let err = s.make_relative_path_current("x/z/a", &mut r).unwrap_err();
+    insta::assert_debug_snapshot!(err, "failed leaf to directory transition restores leaf state", @r#"
+    Custom {
+        kind: Other,
+        error: "failed to push directory",
+    }
+    "#);
+    assert_eq!(
+        s.current_relative(),
+        p("x/z"),
+        "the failed directory transition must restore the current path"
+    );
+    let popped_directories = r.popped_directories.len();
+
+    s.make_relative_path_current("x/q", &mut r)?;
+    assert_eq!(s.current_relative(), p("x/q"));
+    assert_eq!(
+        r.popped_directories.len(),
+        popped_directories,
+        "the failed directory transition must not leave directory state to pop"
+    );
+    Ok(())
+}
+
+#[test]
+fn failed_child_push_after_leaf_to_directory_transition_restores_directory_state() -> TestResult {
+    let mut error_snapshots = Vec::new();
+    for (path_to_fail_on, directory_to_fail_on) in [(Some("x/z/a"), None), (None, Some("x/z/a"))] {
+        let mut s = Stack::new(PathBuf::from("."));
+        let mut r = FailOnce {
+            path_to_fail_on: path_to_fail_on.map(PathBuf::from),
+            directory_to_fail_on: directory_to_fail_on.map(PathBuf::from),
+            ..Default::default()
+        };
+
+        s.make_relative_path_current("x/z", &mut r)?;
+        let err = s.make_relative_path_current("x/z/a/b", &mut r).unwrap_err();
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+        assert_eq!(
+            s.current_relative(),
+            p("x/z"),
+            "the failed child push must restore the current relative path"
+        );
+        let popped_directories = r.popped_directories.len();
+
+        s.make_relative_path_current("x/q", &mut r)?;
+        assert_eq!(s.current_relative(), p("x/q"));
+        assert_eq!(
+            r.popped_directories[popped_directories],
+            PathBuf::from("x/z"),
+            "the successful leaf-to-directory transition remains the next directory state to pop"
+        );
+    }
+    insta::assert_debug_snapshot!(error_snapshots, "failed child push after leaf to directory transition restores directory state", @r#"
+    [
+        Custom {
+            kind: Other,
+            error: "failed to push",
+        },
+        Custom {
+            kind: Other,
+            error: "failed to push directory",
+        },
+    ]
+    "#);
     Ok(())
 }

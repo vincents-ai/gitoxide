@@ -1,8 +1,6 @@
-#![allow(clippy::result_large_err)]
-use super::Error;
 use crate::{
-    config,
-    config::tree::{gitoxide, Core},
+    Result, config,
+    config::tree::{Core, gitoxide},
 };
 
 pub(crate) fn interpolate_context<'a>(
@@ -26,58 +24,53 @@ pub(crate) fn base_options(lossy: bool, lenient: bool) -> gix_config::file::init
 
 /// Also sets the default if it's not set!
 pub(crate) fn config_bool(
-    config: &gix_config::File<'_>,
+    config: &gix_config::File,
     key: &'static config::tree::keys::Boolean,
     key_str: &str,
     default: bool,
     lenient: bool,
-) -> Result<bool, Error> {
+) -> Result<bool> {
     use config::tree::Key;
     debug_assert_eq!(
         key_str,
         key.logical_name(),
         "BUG: key name and hardcoded name must match"
     );
-    config
-        .boolean(key_str)
-        .map_or(Ok(default), |res| key.enrich_error(res))
-        .map_err(Error::from)
-        .with_lenient_default(lenient)
+    Ok(key
+        .enrich_error(config.boolean(key_str))
+        .with_lenient_default(lenient)?
+        .unwrap_or(default))
 }
 
 pub(crate) fn config_bool_opt(
-    config: &gix_config::File<'_>,
+    config: &gix_config::File,
     key: &'static config::tree::keys::Boolean,
     key_str: &str,
     lenient: bool,
-) -> Result<Option<bool>, Error> {
+) -> Result<Option<bool>> {
     use config::tree::Key;
     debug_assert_eq!(
         key_str,
         key.logical_name(),
         "BUG: key name and hardcoded name must match"
     );
-    config
-        .boolean(key_str)
-        .map(|res| key.enrich_error(res).map_err(Error::from).with_lenient_default(lenient))
-        .transpose()
+    key.enrich_error(config.boolean(key_str)).with_leniency(lenient)
 }
 
 pub(crate) fn query_refupdates(
-    config: &gix_config::File<'static>,
+    config: &gix_config::File,
     lenient_config: bool,
-) -> Result<Option<gix_ref::store::WriteReflog>, Error> {
+) -> Result<Option<gix_ref::store::WriteReflog>> {
     let key = "core.logAllRefUpdates";
     Core::LOG_ALL_REF_UPDATES
         .try_into_ref_updates(config.boolean(key))
         .with_leniency(lenient_config)
-        .map_err(Into::into)
 }
 
 pub(crate) fn query_refs_namespace(
-    config: &gix_config::File<'static>,
+    config: &gix_config::File,
     lenient_config: bool,
-) -> Result<Option<gix_ref::Namespace>, config::refs_namespace::Error> {
+) -> Result<Option<gix_ref::Namespace>> {
     let key = "gitoxide.core.refsNamespace";
     config
         .string(key)
@@ -101,30 +94,22 @@ pub(crate) type ObjectCaches = (Option<usize>, Option<usize>, usize, Option<usiz
 
 /// Return `(static_pack_cache_limit, pack_cache_bytes, object_cache_bytes, alloc_limit_bytes)` as parsed from gix-config.
 pub(crate) fn parse_object_caches(
-    config: &gix_config::File<'static>,
+    config: &gix_config::File,
     lenient: bool,
     mut filter_config_section: fn(&gix_config::file::Metadata) -> bool,
-) -> Result<ObjectCaches, Error> {
-    let static_pack_cache_limit = config
-        .integer_filter("gitoxide.core.deltaBaseCacheLimit", &mut filter_config_section)
-        .map(|res| gitoxide::Core::DEFAULT_PACK_CACHE_MEMORY_LIMIT.try_into_usize(res))
-        .transpose()
+) -> Result<ObjectCaches> {
+    let static_pack_cache_limit = gitoxide::Core::DEFAULT_PACK_CACHE_MEMORY_LIMIT
+        .try_into_usize(config.integer_filter("gitoxide.core.defaultPackCacheMemoryLimit", &mut filter_config_section))
         .with_leniency(lenient)?;
-    let pack_cache_bytes = config
-        .integer_filter("core.deltaBaseCacheLimit", &mut filter_config_section)
-        .map(|res| Core::DELTA_BASE_CACHE_LIMIT.try_into_usize(res))
-        .transpose()
+    let pack_cache_bytes = Core::DELTA_BASE_CACHE_LIMIT
+        .try_into_usize(config.integer_filter("core.deltaBaseCacheLimit", &mut filter_config_section))
         .with_leniency(lenient)?;
-    let object_cache_bytes = config
-        .integer_filter("gitoxide.objects.cacheLimit", &mut filter_config_section)
-        .map(|res| gitoxide::Objects::CACHE_LIMIT.try_into_usize(res))
-        .transpose()
+    let object_cache_bytes = gitoxide::Objects::CACHE_LIMIT
+        .try_into_usize(config.integer_filter("gitoxide.objects.cacheLimit", &mut filter_config_section))
         .with_leniency(lenient)?
         .unwrap_or_default();
-    let alloc_limit_bytes = config
-        .integer_filter("gitoxide.objects.allocLimit", &mut filter_config_section)
-        .map(|res| gitoxide::Objects::ALLOC_LIMIT.try_into_usize(res))
-        .transpose()
+    let alloc_limit_bytes = gitoxide::Objects::ALLOC_LIMIT
+        .try_into_usize(config.integer_filter("gitoxide.objects.allocLimit", &mut filter_config_section))
         .with_leniency(lenient)?;
     Ok((
         static_pack_cache_limit,
@@ -134,10 +119,7 @@ pub(crate) fn parse_object_caches(
     ))
 }
 
-pub(crate) fn parse_core_abbrev(
-    config: &gix_config::File<'static>,
-    object_hash: gix_hash::Kind,
-) -> Result<Option<usize>, Error> {
+pub(crate) fn parse_core_abbrev(config: &gix_config::File, object_hash: gix_hash::Kind) -> Result<Option<usize>> {
     Ok(config
         .string("core.abbrev")
         .map(|abbrev| Core::ABBREV.try_into_abbreviation(abbrev, object_hash))
@@ -147,9 +129,9 @@ pub(crate) fn parse_core_abbrev(
 
 #[cfg(feature = "revision")]
 pub(crate) fn disambiguate_hint(
-    config: &gix_config::File<'static>,
+    config: &gix_config::File,
     lenient_config: bool,
-) -> Result<Option<crate::revision::spec::parse::ObjectKindHint>, config::key::GenericErrorWithValue> {
+) -> Result<Option<crate::revision::spec::parse::ObjectKindHint>> {
     match config.string("core.disambiguate") {
         None => Ok(None),
         Some(value) => Core::DISAMBIGUATE
@@ -171,7 +153,7 @@ pub trait ApplyLeniencyDefaultValue<T> {
     fn with_lenient_default_value(self, is_lenient: bool, default: T) -> Self;
 }
 
-impl<T, E> ApplyLeniency for Result<Option<T>, E> {
+impl<T, E> ApplyLeniency for std::result::Result<Option<T>, E> {
     fn with_leniency(self, is_lenient: bool) -> Self {
         match self {
             Ok(v) => Ok(v),
@@ -181,7 +163,7 @@ impl<T, E> ApplyLeniency for Result<Option<T>, E> {
     }
 }
 
-impl<T, E> ApplyLeniencyDefault for Result<T, E>
+impl<T, E> ApplyLeniencyDefault for std::result::Result<T, E>
 where
     T: Default,
 {
@@ -194,7 +176,7 @@ where
     }
 }
 
-impl<T, E> ApplyLeniencyDefaultValue<T> for Result<T, E> {
+impl<T, E> ApplyLeniencyDefaultValue<T> for std::result::Result<T, E> {
     fn with_lenient_default_value(self, is_lenient: bool, default: T) -> Self {
         match self {
             Ok(v) => Ok(v),

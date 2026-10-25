@@ -34,9 +34,10 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+use gix_error::Result;
 use std::borrow::Cow;
 
 /// For convenience to allow using `bstr` without adding it to own cargo manifest.
@@ -49,6 +50,8 @@ use smallvec::SmallVec;
 ///
 pub mod commit;
 mod object;
+/// Cryptographic signature discovery and, with the `signature` feature, external signing and verification.
+pub mod signature;
 ///
 pub mod tag;
 ///
@@ -60,12 +63,6 @@ pub mod data;
 
 ///
 pub mod find;
-
-///
-pub mod write {
-    /// The error type returned by the [`Write`](crate::Write) trait.
-    pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-}
 
 mod traits;
 pub use traits::{Exists, Find, FindExt, FindObjectOrHeader, Header as FindHeader, HeaderExt, Write, WriteTo};
@@ -79,7 +76,7 @@ pub mod kind;
 /// The four types of objects that git differentiates.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 pub enum Kind {
     Tree,
     Blob,
@@ -185,8 +182,10 @@ pub struct TagRef<'a> {
     pub tagger: Option<&'a BStr>,
     /// The message describing this release.
     pub message: &'a BStr,
-    /// A cryptographic signature over the entire content of the serialized tag object thus far.
-    pub pgp_signature: Option<&'a BStr>,
+    /// Any Git-supported in-body cryptographic signature.
+    ///
+    /// Use [`signature()`](TagRef::signature()) to also obtain its detected format.
+    pub signature: Option<&'a BStr>,
 }
 
 /// Like [`TagRef`], but as `Iterator` to support entirely allocation free parsing.
@@ -212,8 +211,10 @@ pub struct Tag {
     pub tagger: Option<gix_actor::Signature>,
     /// The message describing the tag.
     pub message: BString,
-    /// A pgp signature over all bytes of the encoded tag, excluding the pgp signature itself.
-    pub pgp_signature: Option<BString>,
+    /// Any Git-supported in-body cryptographic signature.
+    ///
+    /// Use [`signature()`](Tag::signature()) to also obtain its detected format.
+    pub signature: Option<BString>,
 }
 
 /// Immutable objects are read-only structures referencing most data from [a byte slice](ObjectRef::from_bytes()).
@@ -225,7 +226,7 @@ pub struct Tag {
 /// An `ObjectRef` is representing [`Trees`](TreeRef), [`Blobs`](BlobRef), [`Commits`](CommitRef), or [`Tags`](TagRef).
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 pub enum ObjectRef<'a> {
     #[cfg_attr(feature = "serde", serde(borrow))]
     Tree(TreeRef<'a>),
@@ -244,7 +245,7 @@ pub enum ObjectRef<'a> {
 /// An `Object` is representing [`Trees`](Tree), [`Blobs`](Blob), [`Commits`](Commit), or [`Tags`](Tag).
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[allow(clippy::large_enum_variant, missing_docs)]
+#[expect(missing_docs)]
 pub enum Object {
     Tree(Tree),
     Blob(Blob),
@@ -294,7 +295,7 @@ pub struct Data<'a> {
     /// kind of object
     pub kind: Kind,
     /// The hash kind to use for parsing this data.
-    pub hash_kind: gix_hash::Kind,
+    pub object_hash: gix_hash::Kind,
     /// decoded, decompressed data, owned by a backing store.
     pub data: &'a [u8],
 }
@@ -310,62 +311,34 @@ pub struct Header {
 
 ///
 pub mod decode {
+    use gix_error::Result;
     mod error {
-        pub(crate) fn empty_error() -> Error {
-            Error
+        pub(crate) fn empty_error() -> gix_error::Message {
+            gix_error::validation("object parsing failed")
         }
-
-        /// A type to indicate any error occurred during parsing.
-        #[derive(Debug, Clone, Copy, Default)]
-        pub struct Error;
-
-        impl std::fmt::Display for Error {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("object parsing failed")
-            }
-        }
-
-        impl std::error::Error for Error {}
     }
+
     pub(crate) use error::empty_error;
-    pub use error::Error;
-
-    /// Returned by [`loose_header()`]
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum LooseHeaderDecodeError {
-        #[error("{message}: {number:?}")]
-        ParseIntegerError {
-            source: gix_utils::btoi::ParseIntegerError,
-            message: &'static str,
-            number: bstr::BString,
-        },
-        #[error("{message}")]
-        InvalidHeader { message: &'static str },
-        #[error("The object header contained an unknown object kind.")]
-        ObjectHeader(#[from] super::kind::Error),
-    }
 
     use bstr::ByteSlice;
+    use gix_error::{OptionExt, ResultExt, validation};
     /// Decode a loose object header, being `<kind> <size>\0`, returns
     /// ([`kind`](super::Kind), `size`, `consumed bytes`).
     ///
     /// `size` is the uncompressed size of the payload in bytes.
-    pub fn loose_header(input: &[u8]) -> Result<(super::Kind, u64, usize), LooseHeaderDecodeError> {
-        use LooseHeaderDecodeError::*;
-        let kind_end = input.find_byte(0x20).ok_or(InvalidHeader {
-            message: "Expected '<type> <size>'",
-        })?;
-        let kind = super::Kind::from_bytes(&input[..kind_end])?;
-        let size_end = input.find_byte(0x0).ok_or(InvalidHeader {
-            message: "Did not find 0 byte in header",
-        })?;
+    /// Invalid kind or size fields include their bytes as `input` [metadata](gix_error::Error::metadata()).
+    pub fn loose_header(input: &[u8]) -> Result<(super::Kind, u64, usize)> {
+        let kind_end = input
+            .find_byte(0x20)
+            .ok_or_raise(|| validation("Expected '<type> <size>'"))?;
+        let kind = super::Kind::from_bytes(&input[..kind_end])
+            .or_raise(|| validation("The object header contained an unknown object kind."))?;
+        let size_end = input
+            .find_byte(0x0)
+            .ok_or_raise(|| validation("Did not find 0 byte in header"))?;
         let size_bytes = &input[kind_end + 1..size_end];
-        let size = gix_utils::btoi::to_signed(size_bytes).map_err(|source| ParseIntegerError {
-            source,
-            message: "Object size in header could not be parsed",
-            number: size_bytes.into(),
-        })?;
+        let size = gix_utils::btoi::to_signed(size_bytes)
+            .or_raise(|| validation("Object size in header could not be parsed").with_input(size_bytes))?;
         Ok((kind, size, size_end + 1))
     }
 }
@@ -376,19 +349,15 @@ fn object_hasher(hash_kind: gix_hash::Kind, object_kind: Kind, object_size: u64)
     hasher
 }
 
-/// A function to compute a hash of kind `hash_kind` for an object of `object_kind` and its `data`.
+/// A function to compute a hash of kind `object_hash` for an object of `object_kind` and its `data`.
 #[doc(alias = "hash_object", alias = "git2")]
-pub fn compute_hash(
-    hash_kind: gix_hash::Kind,
-    object_kind: Kind,
-    data: &[u8],
-) -> Result<gix_hash::ObjectId, gix_hash::hasher::Error> {
+pub fn compute_hash(hash_kind: gix_hash::Kind, object_kind: Kind, data: &[u8]) -> Result<gix_hash::ObjectId> {
     let mut hasher = object_hasher(hash_kind, object_kind, data.len() as u64);
     hasher.update(data);
     hasher.try_finalize()
 }
 
-/// A function to compute a hash of kind `hash_kind` for an object of `object_kind` and its data read from `stream`
+/// A function to compute a hash of kind `object_hash` for an object of `object_kind` and its data read from `stream`
 /// which has to yield exactly `stream_len` bytes.
 /// Use `progress` to learn about progress in bytes processed and `should_interrupt` to be able to abort the operation
 /// if set to `true`.
@@ -398,9 +367,9 @@ pub fn compute_stream_hash(
     object_kind: Kind,
     stream: &mut dyn std::io::Read,
     stream_len: u64,
-    progress: &mut dyn gix_features::progress::Progress,
+    progress: &mut dyn gix_utils::progress::Progress,
     should_interrupt: &std::sync::atomic::AtomicBool,
-) -> Result<gix_hash::ObjectId, gix_hash::io::Error> {
+) -> Result<gix_hash::ObjectId> {
     let hasher = object_hasher(hash_kind, object_kind, stream_len);
     gix_hash::bytes_with_hasher(stream, stream_len, hasher, progress, should_interrupt)
 }

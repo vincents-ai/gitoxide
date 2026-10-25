@@ -1,28 +1,33 @@
 use bstr::BString;
-use gix_diff::{tree_with_rewrites::Change, Rewrites};
+use gix_diff::{Rewrites, tree_with_rewrites::Change};
+use gix_error::ClassificationMarker;
 
-/// The error returned by [`tree()`](crate::tree()).
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
+/// A recoverable failure of [`tree()`](crate::tree()).
+/// Other failures retain their original causes in the returned exception.
+#[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
-    #[error("Could not find ancestor, our or their tree to get started")]
-    FindTree(#[from] gix_object::find::existing_object::Error),
-    #[error("Could not find ancestor, our or their tree iterator to get started")]
-    FindTreeIter(#[from] gix_object::find::existing_iter::Error),
-    #[error("Failed to diff our side or their side")]
-    DiffTree(#[from] gix_diff::tree_with_rewrites::Error),
-    #[error("Could not apply merge result to base tree")]
-    TreeEdit(#[from] gix_object::tree::editor::Error),
-    #[error("Failed to load resource to prepare for blob merge")]
-    BlobMergeSetResource(#[from] crate::blob::platform::set_resource::Error),
-    #[error(transparent)]
-    BlobMergePrepare(#[from] crate::blob::platform::prepare_merge::Error),
-    #[error(transparent)]
-    BlobMerge(#[from] crate::blob::platform::merge::Error),
-    #[error("Failed to write merged blob content as blob to the object database")]
-    WriteBlobToOdb(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("The merge was performed, but the binary merge result couldn't be selected as it wasn't found")]
-    MergeResourceNotFound,
+    /// The selected binary merge resource is absent, such as the ancestor of an add/add conflict.
+    /// Classified as [`gix_error::Class::NotFound`].
+    MissingBinaryMergeResult,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingBinaryMergeResult => f.write_str(
+                "The merge was performed, but the binary merge result couldn't be selected as it wasn't found",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingBinaryMergeResult => Some(const { &ClassificationMarker::NOT_FOUND }),
+        }
+    }
 }
 
 /// The outcome produced by [`tree()`](crate::tree()).
@@ -294,6 +299,9 @@ impl Conflict {
             match failure {
                 ResolutionFailure::OursRenamedTheirsRenamedDifferently { merged_blob } => *merged_blob,
                 ResolutionFailure::Unknown
+                | ResolutionFailure::SubmoduleMerge
+                | ResolutionFailure::SubmoduleAddAdd
+                | ResolutionFailure::OursRenamedTheirsRenamedToSameLocation
                 | ResolutionFailure::OursDirectoryTheirsNonDirectoryTheirsRenamed { .. }
                 | ResolutionFailure::OursModifiedTheirsDeleted
                 | ResolutionFailure::OursModifiedTheirsRenamedTypeMismatch
@@ -357,6 +365,14 @@ pub enum Resolution {
 /// Describes of a conflict involving *our* change and *their* failed to be resolved.
 #[derive(Debug, Clone)]
 pub enum ResolutionFailure {
+    /// *ours* and *theirs* produced conflicting commits for a submodule, but submodule history isn't available to this
+    /// tree merge to determine whether either commit contains the other.
+    SubmoduleMerge,
+    /// *ours* and *theirs* added different submodule commits at the same path, possibly by renaming one into place.
+    /// There is no common gitlink at this path, so this is not a candidate for three-way reachability resolution.
+    SubmoduleAddAdd,
+    /// *ours* and *theirs* renamed different source entries to the same destination.
+    OursRenamedTheirsRenamedToSameLocation,
     /// *ours* was renamed, but *theirs* was renamed differently. Both versions will be present in the tree,
     OursRenamedTheirsRenamedDifferently {
         /// If `Some(…)`, the content of the involved blob had to be merged.
@@ -476,13 +492,13 @@ pub mod apply_index_entries {
     }
 
     pub(super) mod function {
-        use std::collections::{hash_map, HashMap};
+        use std::collections::{HashMap, hash_map};
 
         use bstr::{BStr, ByteSlice};
 
         use crate::tree::{
-            apply_index_entries::RemovalMode, Conflict, ConflictIndexEntryPathHint, Resolution, ResolutionFailure,
-            TreatAsUnresolved,
+            Conflict, ConflictIndexEntryPathHint, Resolution, ResolutionFailure, TreatAsUnresolved,
+            apply_index_entries::RemovalMode,
         };
 
         /// Returns `true` if `index` changed as we applied conflicting stages to it, using `how` to determine if a
@@ -533,6 +549,9 @@ pub mod apply_index_entries {
                             (Some(conflict.theirs.location()), conflict.ours.location())
                         }
                         ResolutionFailure::OursModifiedTheirsRenamedTypeMismatch
+                        | ResolutionFailure::SubmoduleMerge
+                        | ResolutionFailure::SubmoduleAddAdd
+                        | ResolutionFailure::OursRenamedTheirsRenamedToSameLocation
                         | ResolutionFailure::OursDeletedTheirsRenamed
                         | ResolutionFailure::OursModifiedTheirsDeleted
                         | ResolutionFailure::Unknown => (None, conflict.ours.location()),

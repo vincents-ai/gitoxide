@@ -25,26 +25,31 @@ pub struct Args {
     /// The amount of threads to use for some operations.
     ///
     /// If unset, or the value is 0, there is no limit and all logical cores can be used.
-    #[clap(long, short = 't')]
+    #[clap(long)]
     pub threads: Option<usize>,
 
     /// Display verbose messages and progress information
     #[clap(long, short = 'v')]
     pub verbose: bool,
 
-    /// Display structured `tracing` output in a tree-like structure.
-    #[clap(long)]
+    /// Display tracing output; repeat for more detail and a flat format.
+    ///
+    /// Once is forest-formatted at `info`, twice is forest-formatted at `debug`,
+    /// three times is flat at `debug`, and four times is flat at `trace`.
+    /// Output is buffered independently and written to stderr when the command finishes.
+    /// Colors follow stderr's terminal capabilities and environment configuration.
+    #[clap(
+        long,
+        short = 't',
+        action = clap::ArgAction::Count,
+        value_parser = clap::value_parser!(u8).range(0..=4)
+    )]
     #[cfg(feature = "tracing")]
-    pub trace: bool,
+    pub trace: u8,
 
     /// Turn off verbose message display for commands where these are shown by default.
     #[clap(long, conflicts_with("verbose"))]
     pub no_verbose: bool,
-
-    /// Bring up a terminal user interface displaying progress visually.
-    #[cfg(feature = "prodash-render-tui")]
-    #[clap(long, conflicts_with("verbose"))]
-    pub progress: bool,
 
     /// Don't default malformed configuration flags, but show an error instead. Ignore IO errors as well.
     ///
@@ -53,13 +58,6 @@ pub struct Args {
     //       for these.
     #[clap(long, short = 's')]
     pub strict: bool,
-
-    /// The progress TUI will stay up even though the work is already completed.
-    ///
-    /// Use this to be able to read progress messages or additional information visible in the TUI log pane.
-    #[cfg(feature = "prodash-render-tui")]
-    #[clap(long, conflicts_with("verbose"), requires("progress"))]
-    pub progress_keep_open: bool,
 
     /// Determine the format to use when outputting statistics.
     #[clap(
@@ -153,6 +151,7 @@ pub enum Subcommands {
     /// Show which git configuration values are used or planned.
     ConfigTree,
     Status(status::Platform),
+    Dirwalk(dirwalk::Platform),
     Config(config::Platform),
     #[cfg(feature = "gitoxide-core-tools-corpus")]
     Corpus(corpus::Platform),
@@ -160,8 +159,17 @@ pub enum Subcommands {
     Merge(merge::Platform),
     /// Print paths relevant to the Git installation.
     Env,
+    /// Open paths in the editor selected by Git's precedence rules.
+    Editor {
+        /// Paths to open, or none to start the editor without a file.
+        paths: Vec<PathBuf>,
+    },
     Diff(diff::Platform),
     Log(log::Platform),
+    /// Interactively browse commits and their graph.
+    #[cfg(feature = "tix")]
+    #[clap(visible_alias = "tui", visible_alias = "interactive", visible_alias = "i")]
+    Tix(gix_tix::command::Platform),
     Worktree(worktree::Platform),
     /// Subcommands that need no Git repository to run.
     #[clap(subcommand)]
@@ -290,6 +298,17 @@ pub mod status {
     }
 
     #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
+    pub enum Untracked {
+        /// Do not show untracked files.
+        No,
+        /// Collapse untracked directories when possible.
+        Normal,
+        /// Show individual untracked files.
+        #[default]
+        All,
+    }
+
+    #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
     pub enum Format {
         /// A basic format that is easy to read, and useful for a first glimpse as flat list.
         #[default]
@@ -307,6 +326,9 @@ pub mod status {
         /// If enabled, show ignored files and directories.
         #[clap(long)]
         pub ignored: Option<Option<Ignored>>,
+        /// Define how to show untracked files. If set without a value, show all individual untracked files.
+        #[clap(long, short = 'u', require_equals = true)]
+        pub untracked: Option<Option<Untracked>>,
         /// Define how to display the submodule status. Defaults to git configuration if unset.
         #[clap(long)]
         pub submodules: Option<Submodules>,
@@ -325,6 +347,35 @@ pub mod status {
     }
 }
 
+pub mod dirwalk {
+    use gix::bstr::BString;
+
+    use crate::shared::CheckPathSpec;
+
+    #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
+    pub enum Untracked {
+        /// Collapse untracked directories when possible.
+        #[default]
+        Collapsed,
+        /// Emit matching untracked files and directories.
+        Matching,
+    }
+
+    #[derive(Debug, clap::Parser)]
+    #[command(about = "Run only the repository directory walk")]
+    pub struct Platform {
+        /// Print additional statistics to help understanding performance.
+        #[clap(long, short = 's')]
+        pub statistics: bool,
+        /// How untracked files should be emitted.
+        #[clap(long, default_value = "collapsed")]
+        pub untracked: Untracked,
+        /// The git path specifications to walk.
+        #[clap(value_parser = CheckPathSpec)]
+        pub pathspec: Vec<BString>,
+    }
+}
+
 pub mod merge_base {
     #[derive(Debug, clap::Parser)]
     #[command(about = "A command for calculating all merge-bases")]
@@ -337,6 +388,10 @@ pub mod merge_base {
 }
 
 pub mod worktree {
+    use std::path::PathBuf;
+
+    use gix::bstr::BString;
+
     #[derive(Debug, clap::Parser)]
     #[command(about = "Commands for handling worktrees")]
     pub struct Platform {
@@ -348,6 +403,33 @@ pub mod worktree {
     pub enum SubCommands {
         /// List all worktrees, along with some accompanying information.
         List,
+        /// Add and check out a linked worktree.
+        ///
+        /// Without COMMIT-ISH, reuse the local branch named after PATH or create it from HEAD.
+        /// An explicit local branch is attached; other revisions produce a detached HEAD.
+        /// New branches are retained if subsequent worktree setup fails, like Git.
+        #[clap(visible_alias = "create")]
+        Add {
+            /// Create a new branch at COMMIT-ISH, or HEAD if it is omitted.
+            #[clap(short = 'b', long, value_name = "NEW-BRANCH", value_parser = crate::shared::AsBString, conflicts_with = "detach")]
+            branch: Option<BString>,
+            /// Detach HEAD instead of attaching to or creating a branch.
+            #[clap(short = 'd', long)]
+            detach: bool,
+            /// Where to create the checkout, relative to the current directory.
+            path: PathBuf,
+            /// An existing local branch or a revision that resolves to a commit.
+            #[clap(value_name = "COMMIT-ISH", value_parser = crate::shared::AsBString)]
+            commit_ish: Option<BString>,
+        },
+        /// Remove a linked worktree and its private Git directory, keeping its branch.
+        Remove {
+            /// Discard changes and initialized submodules; repeat to override a worktree lock.
+            #[clap(short, long, action = clap::ArgAction::Count)]
+            force: u8,
+            /// The worktree path or a unique path suffix.
+            worktree: PathBuf,
+        },
     }
 }
 
@@ -577,6 +659,8 @@ pub mod log {
 }
 
 pub mod config {
+    use std::path::PathBuf;
+
     use gix::bstr::BString;
 
     /// Print all entries in a configuration file or access other sub-commands.
@@ -589,6 +673,32 @@ pub mod config {
         /// and comparisons are case-insensitive.
         #[clap(value_parser = crate::shared::AsBString)]
         pub filter: Vec<BString>,
+
+        /// Subcommands for working with configuration files.
+        #[clap(subcommand)]
+        pub cmd: Option<Subcommands>,
+    }
+
+    #[derive(Debug, clap::Subcommand)]
+    pub enum Subcommands {
+        /// Show all resolved configuration entries, optionally filtered by section or subsection.
+        Show,
+        /// List all configuration files contributing to the resolved configuration.
+        ///
+        /// Included files are shown as well, along with the Source they inherit and their inclusion level.
+        List,
+        /// Format a git configuration file, normalizing insignificant whitespace.
+        ///
+        /// Includes are never resolved; only whitespace, newlines and the `=` separator are rewritten.
+        Fmt {
+            /// Write the formatted result back to the input file instead of to standard output.
+            #[clap(long)]
+            in_place: bool,
+            /// The configuration file to format. If unset, the repository-local configuration is used.
+            in_file: Option<PathBuf>,
+            /// Where to write the formatted result. If unset, it is written to standard output.
+            out_file: Option<PathBuf>,
+        },
     }
 }
 
@@ -687,7 +797,7 @@ pub mod clone {
         #[clap(long, short = 'H')]
         pub handshake_info: bool,
 
-        /// The clone will be bare and a working tree checkout won't be available.
+        /// Clone branches into refs/heads without remote-tracking refs, upstream configuration, or a working tree.
         #[clap(long)]
         pub bare: bool,
 
@@ -702,8 +812,17 @@ pub mod clone {
         pub remote: OsString,
 
         /// The name of the reference to check out.
-        #[clap(long = "ref", value_parser = crate::shared::AsPartialRefName, value_name = "REF_NAME")]
+        #[clap(
+            long = "ref",
+            value_parser = crate::shared::AsPartialRefName,
+            value_name = "REF_NAME",
+            conflicts_with = "revision"
+        )]
         pub ref_name: Option<gix::refs::PartialName>,
+
+        /// Fetch only this full reference or object ID and check it out with a detached HEAD.
+        #[clap(long, value_parser = crate::shared::AsBString, value_name = "REVISION")]
+        pub revision: Option<gix::bstr::BString>,
 
         /// The directory to initialize with the new repository and to which all data should be written.
         pub directory: Option<PathBuf>,
@@ -764,6 +883,15 @@ pub mod remote {
     #[derive(Debug, clap::Subcommand)]
     #[clap(visible_alias = "remotes")]
     pub enum Subcommands {
+        /// Print the effective URL of the remote.
+        Url {
+            /// Print all effective URLs instead of only the first one.
+            #[clap(long)]
+            all: bool,
+            /// Print push URLs instead of fetch URLs.
+            #[clap(long)]
+            push: bool,
+        },
         /// Print all references available on the remote.
         Refs,
         /// Print all references available on the remote as filtered through ref-specs.
@@ -1128,11 +1256,11 @@ pub mod exclude {
 
     use gix::bstr::BString;
 
-    use crate::shared::CheckPathSpec;
+    use crate::shared::AsBString;
 
     #[derive(Debug, clap::Subcommand)]
     pub enum Subcommands {
-        /// Check if path-specs are excluded and print the result similar to `git check-ignore`.
+        /// Check if paths are excluded and print the result similar to `git check-ignore`.
         Query {
             /// Print various statistics to stderr.
             #[clap(long, short = 's')]
@@ -1147,9 +1275,9 @@ pub mod exclude {
             /// Useful for undoing previous patterns using the '!' prefix.
             #[clap(long, short = 'p')]
             patterns: Vec<OsString>,
-            /// The git path specifications to check for exclusion, or unset to read from stdin one per line.
-            #[clap(value_parser = CheckPathSpec)]
-            pathspec: Vec<BString>,
+            /// The paths to check for exclusion, or unset to read from stdin one per line.
+            #[clap(value_parser = AsBString)]
+            paths: Vec<BString>,
         },
     }
 }

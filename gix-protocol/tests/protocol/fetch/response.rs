@@ -1,7 +1,7 @@
 use crate::fetch::Cursor;
 #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 use gix_packetline::async_io::StreamingPeekableIter;
-#[cfg(all(feature = "blocking-client", not(feature = "async-client")))]
+#[cfg(feature = "blocking-client")]
 use gix_packetline::blocking_io::StreamingPeekableIter;
 
 fn mock_reader(path: &str) -> StreamingPeekableIter<Cursor> {
@@ -14,12 +14,26 @@ fn id(hex: &str) -> gix_hash::ObjectId {
     gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("expect valid hex id")
 }
 
+#[test]
+fn missing_required_features_are_unsupported() {
+    for features in [Vec::new(), vec![("multi_ack_detailed", None)]] {
+        let err = gix_protocol::fetch::Response::check_required_features(gix_transport::Protocol::V1, &features)
+            .expect_err("the server lacks a capability required by this implementation");
+        assert!(err.is_unsupported(), "another implementation can support these servers");
+        assert!(
+            !err.is_validation(),
+            "missing server capabilities are not invalid caller input"
+        );
+    }
+}
+
 mod v1 {
     mod from_line_reader {
+        use crate::TestResult;
         #[cfg(feature = "blocking-client")]
         use std::io::Read;
 
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         use futures_lite::io::AsyncReadExt;
         use gix_protocol::fetch::{
             self,
@@ -29,8 +43,10 @@ mod v1 {
 
         use crate::fetch::response::{id, mock_reader};
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn clone() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn clone() -> TestResult {
             let mut provider = mock_reader("v1/clone-only.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V1, &mut reader, true, false).await?;
@@ -42,8 +58,10 @@ mod v1 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn shallow_clone() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn shallow_clone() -> TestResult {
             let mut provider = mock_reader("v1/clone-deepen-1.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V1, &mut reader, true, false).await?;
@@ -59,8 +77,10 @@ mod v1 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn empty_shallow_clone_due_to_depth_being_too_high() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn empty_shallow_clone_due_to_depth_being_too_high() -> TestResult {
             let mut provider = mock_reader("v1/clone-deepen-5.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V1, &mut reader, true, false).await?;
@@ -73,8 +93,10 @@ mod v1 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn unshallow_fetch() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn unshallow_fetch() -> TestResult {
             let mut provider = mock_reader("v1/fetch-unshallow.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V1, &mut reader, true, true).await?;
@@ -104,8 +126,10 @@ mod v1 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn fetch_acks_without_pack() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn fetch_acks_without_pack() -> TestResult {
             let mut provider = mock_reader("v1/fetch-no-pack.response");
             let r =
                 fetch::Response::from_line_reader(Protocol::V1, &mut provider.as_read_without_sidebands(), true, true)
@@ -121,8 +145,10 @@ mod v1 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn fetch_acks_and_pack() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn fetch_acks_and_pack() -> TestResult {
             let mut provider = mock_reader("v1/fetch.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V1, &mut reader, true, true).await?;
@@ -145,15 +171,19 @@ mod v1 {
     }
 
     mod arguments {
+        use crate::TestResult;
         use bstr::ByteSlice;
-        use gix_protocol::{fetch, Command};
-        use gix_transport::{client::Capabilities, Protocol};
+        use gix_protocol::{Command, fetch};
+        use gix_transport::{Protocol, client::Capabilities};
 
         use crate::fetch::{response::id, transport};
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn all() -> crate::Result {
-            let (caps, _) = Capabilities::from_bytes(&b"7814e8a05a59c0cf5fb186661d1551c75d1299b5 HEAD\0multi_ack thin-pack filter side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed symref=HEAD:refs/heads/master object-format=sha1 agent=git/2.28.0"[..])?;
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn all() -> TestResult {
+            let (caps, _) = Capabilities::from_bytes(&b"7814e8a05a59c0cf5fb186661d1551c75d1299b5 HEAD\0multi_ack thin-pack filter side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed symref=HEAD:refs/heads/master object-format=sha1 agent=git/2.28.0"[..])
+                ?;
             let mut args = fetch::Arguments::new(
                 Protocol::V1,
                 Command::Fetch.default_features(Protocol::V1, &caps),
@@ -198,32 +228,38 @@ mod v1 {
 
             let _response = args.send(&mut transport, true).await?;
             drop(_response);
-            assert_eq!(out.as_slice().as_bstr(), "009ewant aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa thin-pack side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative multi_ack_detailed filter\n000ddeepen 1\n0014deepen-relative\n0018deepen-since 123456\n0013deepen-not tag\n0035shallow 97c5a932b3940a09683e924ef6a92b31a6f7c6de\n00000032have bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n0009done\n");
+            assert_eq!(
+                out.as_slice().as_bstr(),
+                "009ewant aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa thin-pack side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative multi_ack_detailed filter\n000ddeepen 1\n0014deepen-relative\n0018deepen-since 123456\n0013deepen-not tag\n0035shallow 97c5a932b3940a09683e924ef6a92b31a6f7c6de\n00000032have bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n0009done\n"
+            );
             Ok(())
         }
     }
 }
 mod v2 {
     mod from_line_reader {
+        use crate::TestResult;
         #[cfg(feature = "blocking-client")]
         use std::io::Read;
 
-        #[cfg(feature = "async-client")]
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         use futures_lite::io::AsyncReadExt;
         use gix_protocol::fetch::{
             self,
             response::{Acknowledgement, ShallowUpdate},
         };
-        #[cfg(feature = "async-client")]
+        use gix_transport::Protocol;
+        #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
         use gix_transport::client::async_io::HandleProgress;
         #[cfg(feature = "blocking-client")]
         use gix_transport::client::blocking_io::HandleProgress;
-        use gix_transport::Protocol;
 
         use crate::fetch::response::{id, mock_reader};
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn clone() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn clone() -> TestResult {
             for keepalive in [false, true] {
                 let fixture = format!(
                     "v2/clone-only{}.response",
@@ -246,8 +282,10 @@ mod v2 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn shallow_clone() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn shallow_clone() -> TestResult {
             let mut provider = mock_reader("v2/clone-deepen-1.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V2, &mut reader, true, true).await?;
@@ -263,8 +301,10 @@ mod v2 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn unshallow_fetch() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn unshallow_fetch() -> TestResult {
             let mut provider = mock_reader("v2/fetch-unshallow.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V2, &mut reader, true, true).await?;
@@ -295,8 +335,10 @@ mod v2 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn empty_shallow_clone() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn empty_shallow_clone() -> TestResult {
             let mut provider = mock_reader("v2/clone-deepen-5.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V2, &mut reader, true, true).await?;
@@ -309,8 +351,10 @@ mod v2 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn clone_with_sidebands() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn clone_with_sidebands() -> TestResult {
             let mut provider = mock_reader("v2/clone-only-2.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V2, &mut reader, true, true).await?;
@@ -326,15 +370,16 @@ mod v2 {
             assert_eq!(bytes_read, 1643, "should be able to read the whole pack");
             assert_eq!(&buf[..4], b"PACK");
             assert_eq!(
-                gix_hash::ObjectId::from_bytes_or_panic(&buf[buf.len() - gix_hash::Kind::Sha1.len_in_bytes()..])
-                    .to_string(),
+                gix_hash::ObjectId::from_bytes_or_panic(&buf[buf.len() - gix_hash::Kind::Sha1.len_in_bytes()..]),
                 "f34c9be7e0c3ef2c3ed7c62cc7791dbf6dc5ec9a"
             );
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn fetch_acks_without_pack() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn fetch_acks_without_pack() -> TestResult {
             let mut provider = mock_reader("v2/fetch-no-pack.response");
             let r =
                 fetch::Response::from_line_reader(Protocol::V2, &mut provider.as_read_without_sidebands(), true, true)
@@ -343,24 +388,36 @@ mod v2 {
             Ok(())
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
         async fn fetch_with_err_response() {
+            let mut error_snapshots = Vec::new();
             let mut provider = mock_reader("v2/fetch-err-line.response");
             provider.fail_on_err_lines(true);
             let mut sidebands = provider.as_read_without_sidebands();
             match fetch::Response::from_line_reader(Protocol::V2, &mut sidebands, true, true).await {
                 Ok(_) => panic!("need error response"),
-                Err(err) => match err {
-                    fetch::response::Error::UploadPack(err) => {
-                        assert_eq!(err.message, "segmentation fault\n");
-                    }
-                    err => panic!("we expect upload pack errors, got {err:#?}"),
-                },
+                Err(err) => {
+                    let packetline_err = err
+                        .downcast_any_ref::<gix_transport::packetline::read::Error>()
+                        .unwrap_or_else(|| panic!("the remote ERR packet is retained in the error chain: {err:#?}"));
+                    error_snapshots.push(gix_testtools::redact_debug_snapshot(&(packetline_err), &[]));
+                }
             }
+            insta::assert_debug_snapshot!(error_snapshots, "fetch with err response", @r#"
+            [
+                Error {
+                    message: "segmentation fault\n",
+                },
+            ]
+            "#);
         }
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn fetch_acks_and_pack() -> crate::Result {
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn fetch_acks_and_pack() -> TestResult {
             let mut provider = mock_reader("v2/fetch.response");
             let mut reader = provider.as_read_without_sidebands();
             let r = fetch::Response::from_line_reader(Protocol::V2, &mut reader, true, true).await?;
@@ -375,7 +432,7 @@ mod v2 {
             assert!(r.has_pack());
             let mut buf = Vec::new();
             reader.set_progress_handler(Some(Box::new(|a: bool, b: &[u8]| {
-                gix_protocol::RemoteProgress::translate_to_progress(a, b, &mut gix_features::progress::Discard);
+                gix_protocol::RemoteProgress::translate_to_progress(a, b, &mut gix_utils::progress::Discard);
                 std::ops::ControlFlow::Continue(())
             }) as HandleProgress));
             let bytes_read = reader.read_to_end(&mut buf).await?;
@@ -385,15 +442,19 @@ mod v2 {
     }
 
     mod arguments {
+        use crate::TestResult;
         use bstr::ByteSlice;
-        use gix_protocol::{fetch, Command};
-        use gix_transport::{client::Capabilities, Protocol};
+        use gix_protocol::{Command, fetch};
+        use gix_transport::{Protocol, client::Capabilities};
 
         use crate::fetch::{response::id, transport};
 
-        #[maybe_async::test(feature = "blocking-client", async(feature = "async-client", async_std::test))]
-        async fn all() -> crate::Result {
-            let (caps, _) = Capabilities::from_bytes(&b"7814e8a05a59c0cf5fb186661d1551c75d1299b5 HEAD\0multi_ack thin-pack filter side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed symref=HEAD:refs/heads/master object-format=sha1 agent=git/2.28.0"[..])?;
+        #[crate::bisync::bisync]
+        #[cfg_attr(feature = "blocking-client", test)]
+        #[cfg_attr(all(feature = "async-client", not(feature = "blocking-client")), async_std::test)]
+        async fn all() -> TestResult {
+            let (caps, _) = Capabilities::from_bytes(&b"7814e8a05a59c0cf5fb186661d1551c75d1299b5 HEAD\0multi_ack thin-pack filter side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed symref=HEAD:refs/heads/master object-format=sha1 agent=git/2.28.0"[..])
+                ?;
             let mut args = fetch::Arguments::new(
                 Protocol::V2,
                 Command::Fetch.default_features(Protocol::V1, &caps),

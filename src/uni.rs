@@ -4,13 +4,17 @@
 //!
 //! However, doing this could be interesting for distribution if the files are hard-linked
 //! instead of copied, which is why it is left here.
-#![deny(unsafe_code, rust_2018_idioms)]
+#![deny(unsafe_code)]
 
-use anyhow::{bail, Result};
+use gix::{
+    Result,
+    error::{ResultExt, bail},
+};
 
 #[cfg(feature = "pretty-cli")]
 fn main() -> Result<()> {
-    match std::env::current_exe()?
+    match std::env::current_exe()
+        .or_error()?
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("gix")

@@ -1,8 +1,9 @@
 mod undo {
-    use bstr::{ByteSlice, B};
+    use bstr::{B, ByteSlice};
+    use gix_testtools::TestResult;
 
     #[test]
-    fn no_id_changes_nothing() -> crate::Result {
+    fn no_id_changes_nothing() -> TestResult {
         let mut buf = Vec::new();
         let changed = gix_filter::ident::undo(B("hello"), &mut buf)?;
         assert!(!changed, "the buffer is not touched");
@@ -11,7 +12,7 @@ mod undo {
     }
 
     #[test]
-    fn empty() -> crate::Result {
+    fn empty() -> TestResult {
         let mut buf = Vec::new();
         assert!(
             !gix_filter::ident::undo(B(""), &mut buf)?,
@@ -21,7 +22,7 @@ mod undo {
     }
 
     #[test]
-    fn nothing_if_newline_between_dollars() -> crate::Result {
+    fn nothing_if_newline_between_dollars() -> TestResult {
         let mut buf = Vec::new();
         assert!(!gix_filter::ident::undo(B(" $Id: \n$"), &mut buf)?);
         assert_eq!(buf.len(), 0);
@@ -29,7 +30,7 @@ mod undo {
     }
 
     #[test]
-    fn nothing_if_it_is_not_id() -> crate::Result {
+    fn nothing_if_it_is_not_id() -> TestResult {
         let mut buf = Vec::new();
         assert!(
             !gix_filter::ident::undo(B(" $id: something$"), &mut buf)?,
@@ -40,7 +41,7 @@ mod undo {
     }
 
     #[test]
-    fn anything_between_dollar_id_dollar() -> crate::Result {
+    fn anything_between_dollar_id_dollar() -> TestResult {
         let mut buf = Vec::new();
         assert!(gix_filter::ident::undo(B(" $Id: something$\nhello"), &mut buf)?);
         assert_eq!(buf.as_bstr(), " $Id$\nhello");
@@ -48,7 +49,7 @@ mod undo {
     }
 
     #[test]
-    fn multiple() -> crate::Result {
+    fn multiple() -> TestResult {
         let mut buf = Vec::new();
         assert!(gix_filter::ident::undo(
             B("$Id: a\n$ $Id: something$\nhello$Id: hex$\nlast $Id:other$\n$Id: \n$"),
@@ -66,11 +67,12 @@ mod undo {
 }
 
 mod apply {
-    use bstr::{ByteSlice, B};
+    use bstr::{B, ByteSlice};
     use gix_filter::ident;
+    use gix_testtools::TestResult;
 
     #[test]
-    fn no_change() -> crate::Result {
+    fn no_change() -> TestResult {
         let mut buf = Vec::new();
         for input_no_match in [
             "",
@@ -78,11 +80,7 @@ mod apply {
             "$ID$ case sensitive matching",
             "$Id: expanded is ignored$",
         ] {
-            let changed = ident::apply(
-                input_no_match.as_bytes(),
-                gix_testtools::hash_kind_from_env().unwrap_or_default(),
-                &mut buf,
-            )?;
+            let changed = ident::apply(input_no_match.as_bytes(), gix_testtools::object_hash(), &mut buf)?;
             assert!(!changed, "no substitution happens, nothing to do");
             assert_eq!(buf.len(), 0);
         }
@@ -90,17 +88,13 @@ mod apply {
     }
 
     #[test]
-    fn simple() -> crate::Result {
+    fn simple() -> TestResult {
         let mut buf = Vec::new();
         assert!(
-            ident::apply(
-                B("$Id$"),
-                gix_testtools::hash_kind_from_env().unwrap_or_default(),
-                &mut buf
-            )?,
+            ident::apply(B("$Id$"), gix_testtools::object_hash(), &mut buf)?,
             "a change happens"
         );
-        let expected_hash = match gix_testtools::hash_kind_from_env().unwrap_or_default() {
+        let expected_hash = match gix_testtools::object_hash() {
             gix_hash::Kind::Sha1 => "b3f5ebfb5843bc43ceecff6d4f26bb37c615beb1",
             gix_hash::Kind::Sha256 => "63cdf77e7872965e2af1bee42e925f9b4bd6a3ab9f5ef6c06c4312f7d90d8021",
             _ => unimplemented!(),
@@ -109,10 +103,10 @@ mod apply {
 
         assert!(ident::apply(
             B("$Id$ $Id$ foo"),
-            gix_testtools::hash_kind_from_env().unwrap_or_default(),
+            gix_testtools::object_hash(),
             &mut buf
         )?);
-        let expected_hash = match gix_testtools::hash_kind_from_env().unwrap_or_default() {
+        let expected_hash = match gix_testtools::object_hash() {
             gix_hash::Kind::Sha1 => "e230cff7a9624f59eaa28bfb97602c3a03651a49",
             gix_hash::Kind::Sha256 => "64a29d2cfd88cf6cfd786cdd88e99112bef2f7d8596a8701f6955784624604ca",
             _ => unimplemented!(),
@@ -125,18 +119,14 @@ mod apply {
     }
 
     #[test]
-    fn round_trips() -> crate::Result {
+    fn round_trips() -> TestResult {
         let mut buf = Vec::new();
         for input in [
             "hi\n$Id$\nho\n\t$Id$$Id$$Id$",
             "$Id$",
             "$Id$ and one more $Id$ and done",
         ] {
-            let changed = ident::apply(
-                B(input),
-                gix_testtools::hash_kind_from_env().unwrap_or_default(),
-                &mut buf,
-            )?;
+            let changed = ident::apply(B(input), gix_testtools::object_hash(), &mut buf)?;
             assert!(changed, "the input was rewritten");
             assert!(ident::undo(&buf.clone(), &mut buf)?, "undo does something as well");
             assert_eq!(buf.as_bstr(), input, "the filter can be undone perfectly");

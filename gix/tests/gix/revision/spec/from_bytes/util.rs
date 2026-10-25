@@ -1,121 +1,131 @@
-#![allow(clippy::result_large_err)]
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use crate::Result;
+use gix_error::Error;
+use std::{collections::HashMap, path::Path, str::FromStr};
 
 use gix_object::{bstr, bstr::BStr};
 use gix_ref::bstr::{BString, ByteSlice};
 use gix_revision::spec::Kind;
-use std::sync::LazyLock;
 
 const FIXTURE_NAME: &str = "make_rev_spec_parse_repos.sh";
-static BASELINE: LazyLock<HashMap<PathBuf, HashMap<BString, Option<gix_revision::Spec>>>> = LazyLock::new(|| {
-    fn kind_of(spec: &BStr) -> gix_revision::spec::Kind {
-        if spec.starts_with(b"^") {
-            gix_revision::spec::Kind::IncludeReachable
-        } else if spec.contains_str(b"...") {
-            gix_revision::spec::Kind::ReachableToMergeBase
-        } else if spec.contains_str(b"..") {
-            gix_revision::spec::Kind::RangeBetween
-        } else if spec.ends_with(b"^!") {
-            gix_revision::spec::Kind::ExcludeReachableFromParents
-        } else if spec.ends_with(b"^@") {
-            unreachable!("BUG: cannot use rev^@ as it won't list the actual commit")
-        } else {
-            gix_revision::spec::Kind::IncludeReachable
-        }
+
+/// Replace fixture paths in diagnostics independently of hash kind, seed, and platform.
+pub fn normalize_repo_path(message: &str, repo: &gix::Repository) -> String {
+    message
+        .replace("\\\\", "/")
+        .replace('\\', "/")
+        .replace(&repo.git_dir().to_string_lossy().replace('\\', "/"), "$GIT_DIR")
+}
+
+fn git_has_correct_pattern_revision_order(version: (u8, u8, u8)) -> bool {
+    // Git 57fb139b5e accidentally reversed `:/<text>` traversal order in 2.47.x.
+    // Git 0ff919e87a restored youngest-first traversal starting with 2.48.0.
+    !((2, 47, 0)..(2, 48, 0)).contains(&version)
+}
+
+fn kind_of(spec: &BStr) -> gix_revision::spec::Kind {
+    if spec.starts_with(b"^") {
+        gix_revision::spec::Kind::IncludeReachable
+    } else if spec.contains_str(b"...") {
+        gix_revision::spec::Kind::ReachableToMergeBase
+    } else if spec.contains_str(b"..") {
+        gix_revision::spec::Kind::RangeBetween
+    } else if spec.ends_with(b"^!") {
+        gix_revision::spec::Kind::ExcludeReachableFromParents
+    } else if spec.ends_with(b"^@") {
+        unreachable!("BUG: cannot use rev^@ as it won't list the actual commit")
+    } else {
+        gix_revision::spec::Kind::IncludeReachable
     }
-    fn lines_of(kind: gix_revision::spec::Kind) -> Option<usize> {
-        Some(match kind {
-            Kind::ExcludeReachable | Kind::IncludeReachable => 1,
-            Kind::RangeBetween => 2,
-            Kind::ReachableToMergeBase => 3,
-            Kind::IncludeReachableFromParents | Kind::ExcludeReachableFromParents => return None,
-        })
-    }
-    fn object_id_of_next(lines: &mut std::iter::Peekable<bstr::Lines<'_>>) -> gix_hash::ObjectId {
-        let hex_hash = lines.next().expect("valid respect yields enough lines");
-        object_id_of(hex_hash).expect("git yields full objects ids")
-    }
-    fn object_id_of(input: &[u8]) -> Option<gix_hash::ObjectId> {
-        let hex_hash = input.strip_prefix(b"^").unwrap_or(input);
-        gix_hash::ObjectId::from_str(hex_hash.to_str().expect("hex is ascii")).ok()
-    }
-    let mut baseline_map = HashMap::new();
-    let base = gix_testtools::scripted_fixture_read_only(FIXTURE_NAME).unwrap();
-    for baseline_entry in walkdir::WalkDir::new(base)
-        .max_depth(2)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok().and_then(|e| (e.file_name() == "baseline.git").then_some(e)))
-    {
-        let map = baseline_map
-            .entry(baseline_entry.path().parent().expect("file in directory").into())
-            .or_insert_with(HashMap::default);
-        let baseline = std::fs::read(baseline_entry.path()).unwrap();
-        let mut lines = baseline.lines().peekable();
-        while let Some(spec) = lines.next() {
-            let exit_code_or_hash = lines.next().expect("exit code or single hash").to_str().unwrap();
-            let kind = kind_of(spec.as_bstr());
-            let first_hash = match u8::from_str(exit_code_or_hash) {
-                Ok(_exit_code) => {
-                    let is_duplicate = map.insert(spec.into(), None).is_some();
-                    assert!(!is_duplicate, "Duplicate spec '{}' cannot be handled", spec.as_bstr());
-                    continue;
-                }
-                Err(_) => match gix::ObjectId::from_str(exit_code_or_hash) {
-                    Ok(hash) => hash,
-                    Err(_) => break, // for now bail out, we can't parse multi-line results yet
-                },
-            };
-            let num_lines = lines_of(kind);
-            let rev_spec = match num_lines {
-                Some(line_count) => match line_count {
-                    1 if kind == gix_revision::spec::Kind::IncludeReachable => gix_revision::Spec::Include(first_hash),
-                    1 if kind == gix_revision::spec::Kind::ExcludeReachable => gix_revision::Spec::Exclude(first_hash),
-                    2 | 3 => {
-                        let second_hash = object_id_of_next(&mut lines);
-                        if line_count == 2 {
-                            gix_revision::Spec::Range {
-                                from: second_hash,
-                                to: first_hash,
-                            }
-                        } else {
-                            lines.next().expect("merge-base to consume");
-                            gix_revision::Spec::Merge {
-                                theirs: first_hash,
-                                ours: second_hash,
-                            }
+}
+
+fn lines_of(kind: gix_revision::spec::Kind) -> Option<usize> {
+    Some(match kind {
+        Kind::ExcludeReachable | Kind::IncludeReachable => 1,
+        Kind::RangeBetween => 2,
+        Kind::ReachableToMergeBase => 3,
+        Kind::IncludeReachableFromParents | Kind::ExcludeReachableFromParents => return None,
+    })
+}
+
+fn object_id_of_next(lines: &mut std::iter::Peekable<bstr::Lines<'_>>) -> gix_hash::ObjectId {
+    let hex_hash = lines.next().expect("valid result yields enough lines");
+    object_id_of(hex_hash).expect("git yields full object ids")
+}
+
+fn object_id_of(input: &[u8]) -> Option<gix_hash::ObjectId> {
+    let hex_hash = input.strip_prefix(b"^").unwrap_or(input);
+    gix_hash::ObjectId::from_str(hex_hash.to_str().expect("hex is ascii")).ok()
+}
+
+fn baseline_at(repo_dir: &Path) -> HashMap<BString, Option<gix_revision::Spec>> {
+    let mut map = HashMap::new();
+    let baseline_path = repo_dir.join("baseline.git");
+    let baseline = std::fs::read(&baseline_path)
+        .unwrap_or_else(|err| panic!("baseline at \"{}\" can be read: {err}", baseline_path.display()));
+    let mut lines = baseline.lines().peekable();
+    while let Some(spec) = lines.next() {
+        let exit_code_or_hash = lines.next().expect("exit code or single hash").to_str().unwrap();
+        let kind = kind_of(spec.as_bstr());
+        let first_hash = match u8::from_str(exit_code_or_hash) {
+            Ok(_exit_code) => {
+                let is_duplicate = map.insert(spec.into(), None).is_some();
+                assert!(!is_duplicate, "Duplicate spec '{}' cannot be handled", spec.as_bstr());
+                continue;
+            }
+            Err(_) => match gix::ObjectId::from_str(exit_code_or_hash) {
+                Ok(hash) => hash,
+                Err(_) => break, // for now bail out, we can't parse multi-line results yet
+            },
+        };
+        let num_lines = lines_of(kind);
+        let rev_spec = match num_lines {
+            Some(line_count) => match line_count {
+                1 if kind == gix_revision::spec::Kind::IncludeReachable => gix_revision::Spec::Include(first_hash),
+                1 if kind == gix_revision::spec::Kind::ExcludeReachable => gix_revision::Spec::Exclude(first_hash),
+                2 | 3 => {
+                    let second_hash = object_id_of_next(&mut lines);
+                    if line_count == 2 {
+                        gix_revision::Spec::Range {
+                            from: second_hash,
+                            to: first_hash,
                         }
+                    } else {
+                        lines.next().expect("merge-base to consume");
+                        gix_revision::Spec::Merge {
+                            theirs: first_hash,
+                            ours: second_hash,
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            },
+            None => {
+                let rev_spec = match kind {
+                    gix_revision::spec::Kind::ExcludeReachableFromParents => {
+                        gix_revision::Spec::ExcludeParents(first_hash)
                     }
                     _ => unreachable!(),
-                },
-                None => {
-                    let rev_spec = match kind {
-                        gix_revision::spec::Kind::ExcludeReachableFromParents => {
-                            gix_revision::Spec::ExcludeParents(first_hash)
-                        }
-                        _ => unreachable!(),
-                    };
-                    while let Some(_oid) = lines.peek().map(|hex| object_id_of(hex)) {
-                        lines.next();
-                    }
-                    rev_spec
+                };
+                while let Some(_oid) = lines.peek().map(|hex| object_id_of(hex)) {
+                    lines.next();
                 }
-            };
-            let is_duplicate = map.insert(spec.into(), Some(rev_spec)).is_some();
-            assert!(!is_duplicate, "Duplicate spec '{}' cannot be handled", spec.as_bstr());
-            if num_lines.filter(|count| *count > 1).is_some() {
-                // git always considers these errors for some reason, so skip it.
-                lines.next();
+                rev_spec
             }
+        };
+        let is_duplicate = map.insert(spec.into(), Some(rev_spec)).is_some();
+        assert!(!is_duplicate, "Duplicate spec '{}' cannot be handled", spec.as_bstr());
+        if num_lines.filter(|count| *count > 1).is_some() {
+            // git always considers these errors for some reason, so skip it.
+            lines.next();
         }
     }
-    baseline_map
-});
+    map
+}
 
 pub fn parse_spec_no_baseline<'a>(
     spec: &str,
     repo: &'a gix::Repository,
-) -> Result<gix::revision::Spec<'a>, gix_error::Error> {
+) -> std::result::Result<gix::revision::Spec<'a>, Error> {
     parse_spec_no_baseline_opts(spec, repo, Default::default())
 }
 
@@ -130,7 +140,7 @@ enum BaselineExpectation {
 pub fn parse_spec_better_than_baseline<'a>(
     spec: &str,
     repo: &'a gix::Repository,
-) -> Result<gix::revision::Spec<'a>, gix_error::Error> {
+) -> std::result::Result<gix::revision::Spec<'a>, Error> {
     let res = gix::revision::Spec::from_bstr(spec, repo, Default::default());
     compare_with_baseline(&res, repo, spec, BaselineExpectation::GitFailsWeSucceed);
     res
@@ -140,7 +150,7 @@ pub fn parse_spec_no_baseline_opts<'a>(
     spec: &str,
     repo: &'a gix::Repository,
     opts: gix::revision::spec::parse::Options,
-) -> Result<gix::revision::Spec<'a>, gix_error::Error> {
+) -> std::result::Result<gix::revision::Spec<'a>, Error> {
     gix::revision::Spec::from_bstr(spec, repo, opts)
 }
 
@@ -148,29 +158,28 @@ pub fn parse_spec_opts<'a>(
     spec: &str,
     repo: &'a gix::Repository,
     opts: gix::revision::spec::parse::Options,
-) -> Result<gix::revision::Spec<'a>, gix_error::Error> {
+) -> std::result::Result<gix::revision::Spec<'a>, Error> {
     let res = gix::revision::Spec::from_bstr(spec, repo, opts);
     compare_with_baseline(&res, repo, spec, BaselineExpectation::Same);
     res
 }
 
-pub fn rev_parse<'a>(spec: &str, repo: &'a gix::Repository) -> Result<gix::revision::Spec<'a>, gix_error::Error> {
+pub fn rev_parse<'a>(spec: &str, repo: &'a gix::Repository) -> std::result::Result<gix::revision::Spec<'a>, Error> {
     let res = repo.rev_parse(spec);
     compare_with_baseline(&res, repo, spec, BaselineExpectation::Same);
     res
 }
 
 fn compare_with_baseline(
-    res: &Result<gix::revision::Spec<'_>, gix_error::Error>,
+    res: &std::result::Result<gix::revision::Spec<'_>, Error>,
     repo: &gix::Repository,
     spec: &str,
     expectation: BaselineExpectation,
 ) {
     let actual = res.as_deref().ok().copied();
     let spec: BString = spec.into();
-    let expected = *BASELINE
-        .get(repo.workdir().unwrap_or_else(|| repo.git_dir()))
-        .unwrap_or_else(|| panic!("No baseline for {repo:?}"))
+    let baseline = baseline_at(repo.workdir().unwrap_or_else(|| repo.git_dir()));
+    let expected = *baseline
         .get(&spec)
         .unwrap_or_else(|| panic!("'{spec}' revspec not found in git baseline"));
     match expectation {
@@ -186,11 +195,20 @@ fn compare_with_baseline(
     }
 }
 
-pub fn parse_spec(spec: impl AsRef<str>, repo: &gix::Repository) -> Result<gix::revision::Spec<'_>, gix_error::Error> {
+pub fn parse_spec(
+    spec: impl AsRef<str>,
+    repo: &gix::Repository,
+) -> std::result::Result<gix::revision::Spec<'_>, Error> {
     parse_spec_opts(spec.as_ref(), repo, Default::default())
 }
 
-pub fn repo(name: &str) -> crate::Result<gix::Repository> {
+pub fn repo(name: &str) -> Result<gix::Repository> {
     let base = gix_testtools::scripted_fixture_read_only(FIXTURE_NAME)?;
-    Ok(gix::open(base.join(name))?)
+    Ok(gix::open_opts(base.join(name), crate::restricted())?)
+}
+
+pub fn repo_with_correct_pattern_revision_order(name: &str) -> Result<Option<gix::Repository>> {
+    gix_testtools::scripted_fixture_read_only_with_git_version(FIXTURE_NAME, git_has_correct_pattern_revision_order)?
+        .map(|base| gix::open_opts(base.join(name), crate::restricted()).map_err(Into::into))
+        .transpose()
 }

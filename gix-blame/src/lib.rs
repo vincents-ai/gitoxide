@@ -11,13 +11,11 @@
 //!    - The versions of the files that can contain hunks that we could use in the final 'image'
 //!    - multiple at the same time as the commit-graph may split up.
 //!    - They turn into a *Source File* once we have found an association into the *Blamed File*.
-#![deny(rust_2018_idioms, missing_docs)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
-mod error;
-pub use error::Error;
 mod types;
-pub use types::{BlameEntry, BlamePathEntry, BlameRanges, Options, Outcome, Statistics};
+pub use types::{BlameEntry, BlamePathEntry, BlameRanges, Options, Outcome, Start, Statistics};
 
 mod file;
 pub use file::function::file;

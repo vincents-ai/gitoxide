@@ -40,7 +40,7 @@ mod impl_ {
 
         fn owner_of_current_process() -> std::io::Result<u32> {
             // SAFETY: there is no documented possibility for failure
-            #[allow(unsafe_code)]
+            #[expect(unsafe_code)]
             let uid = unsafe { libc::geteuid() };
             Ok(uid)
         }
@@ -88,11 +88,11 @@ mod impl_ {
         path: &Path,
     ) -> io::Result<Vec<u8>> {
         use windows_sys::Win32::{
-            Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER},
+            Foundation::{ERROR_INSUFFICIENT_BUFFER, GetLastError},
             Security::GetTokenInformation,
         };
 
-        #[allow(unsafe_code)]
+        #[expect(unsafe_code)]
         unsafe {
             let mut buffer_size = 36;
             let mut heap_buf = vec![0; 36];
@@ -111,7 +111,7 @@ mod impl_ {
 
                 if GetLastError() != ERROR_INSUFFICIENT_BUFFER {
                     error!(format!(
-                        "Couldn't acquire {class_name} for the {subject} while checking ownership of '{}'",
+                        "Couldn't acquire {class_name} for the {subject} while checking ownership of \"{}\"",
                         path.display()
                     ));
                 }
@@ -133,7 +133,7 @@ mod impl_ {
     ) -> io::Result<T> {
         use windows_sys::Win32::Security::GetTokenInformation;
 
-        #[allow(unsafe_code)]
+        #[expect(unsafe_code)]
         unsafe {
             let mut info = MaybeUninit::<T>::uninit();
             let mut returned_size = 0;
@@ -146,7 +146,7 @@ mod impl_ {
             ) == 0
             {
                 error!(format!(
-                    "Couldn't acquire {class_name} for the {subject} while checking ownership of '{}'",
+                    "Couldn't acquire {class_name} for the {subject} while checking ownership of \"{}\"",
                     path.display()
                 ));
             }
@@ -156,12 +156,12 @@ mod impl_ {
 
     pub fn is_path_owned_by_current_user(path: &Path) -> io::Result<bool> {
         use windows_sys::Win32::{
-            Foundation::{LocalFree, ERROR_INVALID_FUNCTION, ERROR_SUCCESS},
+            Foundation::{ERROR_INVALID_FUNCTION, ERROR_SUCCESS, LocalFree},
             Security::{
                 Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
-                CheckTokenMembership, EqualSid, IsWellKnownSid, TokenElevationType, TokenElevationTypeLimited,
-                TokenLinkedToken, TokenUser, WinBuiltinAdministratorsSid, OWNER_SECURITY_INFORMATION,
-                PSECURITY_DESCRIPTOR, TOKEN_ELEVATION_TYPE, TOKEN_LINKED_TOKEN, TOKEN_QUERY, TOKEN_USER,
+                CheckTokenMembership, EqualSid, IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+                TOKEN_ELEVATION_TYPE, TOKEN_LINKED_TOKEN, TOKEN_QUERY, TOKEN_USER, TokenElevationType,
+                TokenElevationTypeLimited, TokenLinkedToken, TokenUser, WinBuiltinAdministratorsSid,
             },
             System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken},
         };
@@ -180,7 +180,7 @@ mod impl_ {
             return Ok(true);
         }
 
-        #[allow(unsafe_code)]
+        #[expect(unsafe_code)]
         unsafe {
             let (folder_owner, descriptor) = {
                 let mut folder_owner = MaybeUninit::uninit();
@@ -205,7 +205,7 @@ mod impl_ {
                     let inner = io::Error::from_raw_os_error(result as _);
                     error!(
                         inner,
-                        format!("Couldn't get security information for path '{}'", path.display())
+                        format!("Couldn't get security information for path \"{}\"", path.display())
                     );
                 }
 
@@ -216,7 +216,7 @@ mod impl_ {
 
             impl Drop for Descriptor {
                 fn drop(&mut self) {
-                    #[allow(unsafe_code)]
+                    #[expect(unsafe_code)]
                     // SAFETY: syscall only invoked if we have a valid descriptor
                     unsafe {
                         LocalFree(self.0 as _);
@@ -234,7 +234,7 @@ mod impl_ {
                     && OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, token.as_mut_ptr()) == 0
                 {
                     error!(format!(
-                        "Couldn't acquire a thread or process token while checking ownership of '{}'",
+                        "Couldn't acquire a thread or process token while checking ownership of \"{}\"",
                         path.display()
                     ));
                 }
@@ -259,7 +259,7 @@ mod impl_ {
             let mut is_member = 0;
             if CheckTokenMembership(std::ptr::null_mut(), folder_owner, &mut is_member) == 0 {
                 error!(format!(
-                    "Couldn't check whether the current token is in the Administrators group while checking ownership of '{}'",
+                    "Couldn't check whether the current token is in the Administrators group while checking ownership of \"{}\"",
                     path.display()
                 ));
             }
@@ -292,7 +292,7 @@ mod impl_ {
             let mut is_member = 0;
             if CheckTokenMembership(linked_token.as_raw_handle() as _, folder_owner, &mut is_member) == 0 {
                 error!(format!(
-                    "Couldn't check whether the linked elevated token is in the Administrators group while checking ownership of '{}'",
+                    "Couldn't check whether the linked elevated token is in the Administrators group while checking ownership of \"{}\"",
                     path.display()
                 ));
             }

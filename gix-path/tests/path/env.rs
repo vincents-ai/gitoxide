@@ -56,12 +56,150 @@ fn core_dir() {
 }
 
 #[test]
+fn core_dir_program() -> gix_testtools::TestResult {
+    let core_dir = gix_path::env::core_dir().expect("Git is always in PATH when we run tests");
+    let programs = std::fs::read_dir(core_dir)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let stem = name.to_str()?.strip_suffix(std::env::consts::EXE_SUFFIX)?;
+            stem.starts_with("git-").then(|| stem.to_owned())
+        });
+    // Which programs are present as separate executables depends on how Git was built -
+    // Git for Windows, for instance, may not provide programs for builtin subcommands.
+    for stem in programs {
+        let path =
+            gix_path::env::core_dir_program(&stem).expect("a program listed in the core directory is found there");
+        assert!(path.is_file(), "the returned path refers to an existing file");
+        assert!(
+            path.is_absolute(),
+            "the path is absolute as it is based on `git --exec-path`"
+        );
+    }
+    assert_eq!(
+        gix_path::env::core_dir_program("git-program-that-does-not-exist"),
+        None,
+        "programs that don't exist in the core directory are not found"
+    );
+
+    for name in ["", ".", "..", "../git", "git/program", "/git"] {
+        assert_eq!(
+            gix_path::env::core_dir_program(name),
+            None,
+            "program names with path components are rejected"
+        );
+        assert_eq!(
+            gix_path::env::installation_program(name),
+            None,
+            "installation program names with path components are rejected"
+        );
+    }
+
+    #[cfg(windows)]
+    assert_eq!(
+        gix_path::env::core_dir_program(r"git\program"),
+        None,
+        "Windows path separators in program names are rejected"
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        gix_path::env::installation_program(r"git\program"),
+        None,
+        "Windows path separators in installation program names are rejected"
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "Git's bundled bin directories are specific to Git for Windows"
+)]
+fn installation_program_finds_programs_outside_the_core_directory() {
+    let vim =
+        gix_path::env::installation_program("vim").expect("Git for Windows bundles vim outside its core directory");
+    assert!(vim.is_absolute(), "the bundled program path is absolute");
+    assert!(vim.is_file(), "the bundled program exists");
+    assert_ne!(
+        vim.parent(),
+        gix_path::env::core_dir(),
+        "vim is found in a bundled bin directory, not the Git core directory"
+    );
+}
+
+#[test]
 fn system_prefix() {
     assert_ne!(
         gix_path::env::system_prefix(),
         None,
         "git should be present when running tests"
     );
+}
+
+#[cfg(windows)]
+mod windows_prefix {
+    #[test]
+    fn mixed_installation_keeps_mingw64_active() -> gix_testtools::TestResult {
+        Ok(mixed_installation("mingw64")?)
+    }
+
+    #[test]
+    fn mixed_installation_keeps_ucrt64_active() -> gix_testtools::TestResult {
+        Ok(mixed_installation("ucrt64")?)
+    }
+
+    #[test]
+    fn shortcut_uses_the_same_installation_and_system_config() -> gix_testtools::TestResult {
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
+        let installation = tempfile::tempdir()?;
+        std::fs::create_dir(installation.path().join("ucrt64"))?;
+        let _env =
+            gix_testtools::Env::new().set("EXEPATH", installation.path().to_str().expect("UTF-8 temporary path"));
+        let config = installation.path().join("etc/gitconfig");
+        assert_eq!(
+            gix_path::env::installation_config(),
+            Some(config.as_path()),
+            "Git for Windows keeps its installation config in the top-level etc directory"
+        );
+        assert_eq!(
+            gix_path::env::system_config(),
+            Some(config.as_path()),
+            "the EXEPATH shortcut must report that same file as the system config"
+        );
+        assert!(
+            gix_path::env::installation_config_is_system(),
+            "the installation file has system scope"
+        );
+        Ok(())
+    }
+
+    fn mixed_installation(runtime: &str) -> gix_testtools::Result {
+        if gix_testtools::run_in_isolated_process()? {
+            return Ok(());
+        }
+        let installation = tempfile::tempdir()?;
+        for directory in ["mingw64", "ucrt64"] {
+            std::fs::create_dir(installation.path().join(directory))?;
+        }
+        let prefix = installation.path().join(runtime);
+        // Let the real Git report the selected runtime without copying an installation.
+        // Both directories exist, so EXEPATH must fall back to this --exec-path result.
+        let _env = gix_testtools::Env::new()
+            .set("EXEPATH", installation.path().to_str().expect("UTF-8 temporary path"))
+            .set(
+                "GIT_EXEC_PATH",
+                prefix.join("libexec/git-core").to_str().expect("UTF-8 temporary path"),
+            );
+        assert_eq!(
+            gix_path::env::system_prefix(),
+            Some(prefix.as_path()),
+            "an extra runtime directory must not change the prefix selected by Git"
+        );
+        Ok(())
+    }
 }
 
 #[test]

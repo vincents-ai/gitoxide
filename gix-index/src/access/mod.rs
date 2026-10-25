@@ -4,13 +4,13 @@ use bstr::{BStr, ByteSlice, ByteVec};
 use filetime::FileTime;
 
 use crate::{
-    entry,
+    AccelerateLookup, Entry, PathStorage, PathStorageRef, State, Version, entry,
     entry::{Stage, StageRaw},
-    extension, AccelerateLookup, Entry, PathStorage, PathStorageRef, State, Version,
+    extension,
 };
 
 // TODO: integrate this somehow, somewhere, depending on later usage.
-#[allow(dead_code)]
+#[expect(dead_code, reason = "to be used for when we handle checkouts/resets better")]
 mod sparse;
 
 /// General information and entries
@@ -143,7 +143,7 @@ impl State {
     /// It's required perform any case-insensitive lookup.
     /// TODO: needs multi-threaded insertion, raw-table to have multiple locks depending on bucket.
     pub fn prepare_icase_backing(&self) -> AccelerateLookup<'_> {
-        let _span = gix_features::trace::detail!("prepare_icase_backing", entries = self.entries.len());
+        let _span = gix_trace::detail!("prepare_icase_backing", entries = self.entries.len());
         let mut out = AccelerateLookup::with_capacity(self.entries.len());
         for entry in &self.entries {
             let entry_path = entry.path(self);
@@ -188,7 +188,7 @@ impl State {
                 }
             }
         }
-        gix_features::trace::debug!(directories = out.icase_dirs.len(), "stored directories");
+        gix_trace::debug!(directories = out.icase_dirs.len(), "stored directories");
         out
     }
 
@@ -411,12 +411,12 @@ impl State {
                 .walk_entry_stages(low_entry.path(self), low, Ordering::Less)
                 .unwrap_or(low);
         }
-        if let Some(high_entry) = self.entries.get(high) {
-            if high_entry.stage_raw() != 0 {
-                high = self
-                    .walk_entry_stages(high_entry.path(self), high, Ordering::Less)
-                    .unwrap_or(high);
-            }
+        if let Some(high_entry) = self.entries.get(high)
+            && high_entry.stage_raw() != 0
+        {
+            high = self
+                .walk_entry_stages(high_entry.path(self), high, Ordering::Less)
+                .unwrap_or(high);
         }
         (low != high).then_some(low..high)
     }
@@ -629,6 +629,10 @@ impl State {
     /// Access the `tree` extension.
     pub fn tree(&self) -> Option<&extension::Tree> {
         self.tree.as_ref()
+    }
+    /// Mutably access the `tree` extension.
+    pub fn tree_mut(&mut self) -> Option<&mut extension::Tree> {
+        self.tree.as_mut()
     }
     /// Remove the `tree` extension.
     pub fn remove_tree(&mut self) -> Option<extension::Tree> {

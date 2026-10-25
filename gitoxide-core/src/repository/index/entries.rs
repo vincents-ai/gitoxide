@@ -24,16 +24,16 @@ pub(crate) mod function {
     };
 
     use gix::{
-        bstr::{BStr, BString},
+        Repository, Result,
+        bstr::{BStr, BString, ByteSlice},
+        error::ResultExt,
         index::entry::Stage,
         worktree::IndexPersistedOrInMemory,
-        Repository,
     };
 
     use crate::{
-        is_dir_to_mode,
+        OutputFormat, is_dir_to_mode,
         repository::index::entries::{Attributes, Options},
-        OutputFormat,
     };
 
     pub fn entries(
@@ -48,13 +48,13 @@ pub(crate) mod function {
             statistics,
             recurse_submodules,
         }: Options,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let mut out = BufWriter::with_capacity(64 * 1024, out);
         let mut all_attrs = statistics.then(BTreeSet::new);
 
         #[cfg(feature = "serde")]
         if let OutputFormat::Json = format {
-            out.write_all(b"[\n")?;
+            out.write_all(b"[\n").or_error()?;
         }
 
         let stats = print_entries(
@@ -71,26 +71,26 @@ pub(crate) mod function {
 
         #[cfg(feature = "serde")]
         if format == OutputFormat::Json {
-            out.write_all(b"]\n")?;
-            out.flush()?;
+            out.write_all(b"]\n").or_error()?;
+            out.flush().or_error()?;
             if statistics {
-                serde_json::to_writer_pretty(&mut err, &stats)?;
+                serde_json::to_writer_pretty(&mut err, &stats).or_error()?;
             }
         }
         if format == OutputFormat::Human && statistics {
-            out.flush()?;
-            writeln!(err, "{stats:#?}")?;
+            out.flush().or_error()?;
+            writeln!(err, "{stats:#?}").or_error()?;
             if let Some(attrs) = all_attrs.filter(|a| !a.is_empty()) {
-                writeln!(err, "All encountered attributes:")?;
+                writeln!(err, "All encountered attributes:").or_error()?;
                 for attr in attrs {
-                    writeln!(err, "\t{attr}", attr = attr.as_ref())?;
+                    writeln!(err, "\t{attr}", attr = attr.as_ref()).or_error()?;
                 }
             }
         }
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn print_entries(
         repo: &Repository,
         attributes: Option<Attributes>,
@@ -101,7 +101,7 @@ pub(crate) mod function {
         prefix: &BStr,
         recurse_submodules: bool,
         out: &mut impl std::io::Write,
-    ) -> anyhow::Result<Statistics> {
+    ) -> Result<Statistics> {
         let _span = gix::trace::coarse!("print_entries()", git_dir = ?repo.git_dir());
         let (mut pathspec, index, mut cache) = init_cache(repo, attributes, pathspecs.clone())?;
         let mut repo_attrs = all_attrs.is_some().then(BTreeSet::default);
@@ -111,8 +111,8 @@ pub(crate) mod function {
                     .map(|opt| {
                         opt.map(|submodules| {
                             submodules
-                                .map(|sm| sm.path().map(Cow::into_owned).map(move |path| (path, sm)))
-                                .collect::<Result<Vec<_>, _>>()
+                                .map(|sm| sm.path().map(move |path| (path, sm)))
+                                .collect::<std::result::Result<Vec<_>, _>>()
                         })
                     })
                     .transpose()
@@ -127,6 +127,9 @@ pub(crate) mod function {
         if let Some(entries) = index.prefixed_entries(pathspec.common_prefix()) {
             stats.entries_after_prune = entries.len();
             let mut entries = entries.iter().peekable();
+            let mut path = prefix.to_owned();
+            let prefix_len = path.len();
+            let mut buf = Vec::new();
             while let Some(entry) = entries.next() {
                 let mut last_match = None;
                 let attrs = cache
@@ -221,13 +224,22 @@ pub(crate) mod function {
                     )?;
                     stats.submodule.push((sm_path.into_owned(), sm_stats));
                 } else {
+                    let entry_path = entry.path(&index);
+                    let path = if prefix.is_empty() {
+                        entry_path
+                    } else {
+                        path.truncate(prefix_len);
+                        path.extend_from_slice(entry_path);
+                        path.as_bstr()
+                    };
                     match format {
                         OutputFormat::Human => {
                             if simple {
-                                to_human_simple(out, &index, entry, attrs, prefix)
+                                to_human_simple(out, entry, attrs, path, &mut buf)
                             } else {
-                                to_human(out, &index, entry, attrs, prefix)
-                            }?;
+                                to_human(out, entry, attrs, path, &mut buf)
+                            }
+                            .or_error()?;
                         }
                         #[cfg(feature = "serde")]
                         OutputFormat::Json => to_json(out, &index, entry, attrs, entries.peek().is_none(), prefix)?,
@@ -246,12 +258,12 @@ pub(crate) mod function {
         Ok(stats)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn init_cache(
         repo: &Repository,
         attributes: Option<Attributes>,
         pathspecs: impl IntoIterator<Item = impl AsRef<BStr>>,
-    ) -> anyhow::Result<(
+    ) -> Result<(
         gix::pathspec::Search,
         IndexPersistedOrInMemory,
         Option<(gix::attrs::search::Outcome, gix::AttributeStack<'_>)>,
@@ -306,7 +318,7 @@ pub(crate) mod function {
     #[cfg_attr(feature = "serde", derive(serde::Serialize))]
     #[derive(Default, Debug)]
     struct Statistics {
-        #[allow(dead_code)] // Not really dead, but Debug doesn't count for it even though it's crucial.
+        // Not really dead, but Debug doesn't count for it even though it's crucial.
         pub entries: usize,
         pub entries_after_prune: usize,
         pub excluded: usize,
@@ -325,7 +337,7 @@ pub(crate) mod function {
         attrs: Option<Attrs>,
         is_last: bool,
         prefix: &BStr,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         use gix::bstr::ByteSlice;
         #[derive(serde::Serialize)]
         struct Entry<'a> {
@@ -353,46 +365,42 @@ pub(crate) mod function {
                 },
                 meta: attrs,
             },
-        )?;
+        )
+        .or_error()?;
 
         if is_last {
-            out.write_all(b"\n")?;
+            out.write_all(b"\n").or_error()?;
         } else {
-            out.write_all(b",\n")?;
+            out.write_all(b",\n").or_error()?;
         }
         Ok(())
     }
 
     fn to_human_simple(
         out: &mut impl std::io::Write,
-        file: &gix::index::File,
         entry: &gix::index::Entry,
         attrs: Option<Attrs>,
-        prefix: &BStr,
+        path: &BStr,
+        buf: &mut Vec<u8>,
     ) -> std::io::Result<()> {
-        if !prefix.is_empty() {
-            out.write_all(prefix)?;
-        }
+        out.write_all(gix::quote::for_display(path, buf))?;
         match attrs {
-            Some(attrs) => {
-                out.write_all(entry.path(file))?;
-                out.write_all(print_attrs(Some(attrs), entry.mode).as_bytes())
-            }
-            None => out.write_all(entry.path(file)),
+            Some(attrs) => out.write_all(print_attrs(Some(attrs), entry.mode).as_bytes()),
+            None => Ok(()),
         }?;
         out.write_all(b"\n")
     }
 
     fn to_human(
         out: &mut impl std::io::Write,
-        file: &gix::index::File,
         entry: &gix::index::Entry,
         attrs: Option<Attrs>,
-        prefix: &BStr,
+        path: &BStr,
+        buf: &mut Vec<u8>,
     ) -> std::io::Result<()> {
-        writeln!(
+        write!(
             out,
-            "{} {}{:?} {} {}{}{}",
+            "{} {}{:?} {} ",
             match entry.flags.stage() {
                 Stage::Unconflicted => "       ",
                 Stage::Base => "BASE   ",
@@ -406,10 +414,10 @@ pub(crate) mod function {
             },
             entry.mode,
             entry.id,
-            prefix,
-            entry.path(file),
-            print_attrs(attrs, entry.mode)
-        )
+        )?;
+        out.write_all(gix::quote::for_display(path, buf))?;
+        out.write_all(print_attrs(attrs, entry.mode).as_bytes())?;
+        out.write_all(b"\n")
     }
 
     fn print_attrs(attrs: Option<Attrs>, mode: gix::index::entry::Mode) -> Cow<'static, str> {

@@ -30,7 +30,7 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 use bstr::BStr;
@@ -42,6 +42,7 @@ pub mod parse;
 ///
 /// Errors may occur per line, but it's up to the caller to stop iteration when
 /// one is encountered.
+/// Errors include the invalid line or remaining portion as `input` bytes in [metadata](gix_error::Error::metadata()).
 pub fn parse(buf: &[u8]) -> parse::Lines<'_> {
     parse::Lines::new(buf)
 }

@@ -1,21 +1,25 @@
 use std::{collections::VecDeque, io::Write};
 
-use gix_filter::{driver::apply::MaybeDelayed, pipeline::convert::ToWorktreeOutcome};
-use gix_object::{
-    bstr::{BStr, BString, ByteSlice, ByteVec},
-    tree, FindExt,
+use gix_filter::{
+    driver::apply::MaybeDelayed,
+    pipeline::convert::{ToWorktreeOutcome, to_worktree},
 };
-use gix_traverse::tree::{visit::Action, Visit};
+use gix_object::{
+    FindExt,
+    bstr::{BStr, BString, ByteSlice, ByteVec},
+    tree,
+};
+use gix_traverse::tree::{Visit, visit::Action};
 
-use gix_error::{message, ResultExt};
+use gix_error::{Result, ResultExt, message};
 
-use crate::{entry::Error, protocol, SharedErrorSlot};
+use crate::{SharedErrorSlot, protocol};
 
 pub struct Delegate<'a, AttributesFn, Find>
 where
     Find: gix_object::Find,
 {
-    pub(crate) out: &'a mut gix_features::io::pipe::Writer,
+    pub(crate) out: &'a mut gix_utils::io::pipe::Writer,
     pub(crate) err: SharedErrorSlot,
     pub(crate) path_deque: VecDeque<BString>,
     pub(crate) path: BString,
@@ -29,8 +33,7 @@ where
 impl<AttributesFn, Find> Delegate<'_, AttributesFn, Find>
 where
     Find: gix_object::Find,
-    AttributesFn:
-        FnMut(&BStr, gix_object::tree::EntryMode, &mut gix_attributes::search::Outcome) -> Result<(), Error> + 'static,
+    AttributesFn: FnMut(&BStr, gix_object::tree::EntryMode, &mut gix_attributes::search::Outcome) -> Result + 'static,
 {
     fn pop_element(&mut self) {
         if let Some(pos) = self.path.rfind_byte(b'/') {
@@ -59,7 +62,7 @@ where
             .state
     }
 
-    fn handle_entry(&mut self, entry: &tree::EntryRef<'_>) -> Result<Action, Error> {
+    fn handle_entry(&mut self, entry: &tree::EntryRef<'_>) -> Result<Action> {
         if !entry.mode.is_blob_or_symlink() {
             return Ok(std::ops::ControlFlow::Continue(true));
         }
@@ -80,12 +83,14 @@ where
                 &mut |a, b| {
                     (self.fetch_attributes)(a, entry.mode, b).ok();
                 },
-                gix_filter::driver::apply::Delay::Forbid,
+                to_worktree::Options {
+                    can_delay: gix_filter::driver::apply::Delay::Forbid,
+                    unknown_encoding: to_worktree::UnknownEncoding::Fail,
+                },
             )
             .or_raise(|| message("Could not convert to worktree representation"))?;
 
         // Our pipe writer always writes the whole amount.
-        #[allow(clippy::unused_io_amount)]
         match converted {
             ToWorktreeOutcome::Unchanged(buf) | ToWorktreeOutcome::Buffer(buf) => {
                 protocol::write_entry_header_and_path(
@@ -115,8 +120,7 @@ where
 impl<AttributesFn, Find> Visit for Delegate<'_, AttributesFn, Find>
 where
     Find: gix_object::Find,
-    AttributesFn:
-        FnMut(&BStr, gix_object::tree::EntryMode, &mut gix_attributes::search::Outcome) -> Result<(), Error> + 'static,
+    AttributesFn: FnMut(&BStr, gix_object::tree::EntryMode, &mut gix_attributes::search::Outcome) -> Result + 'static,
 {
     fn pop_back_tracked_path_and_set_current(&mut self) {
         self.path = self.path_deque.pop_back().unwrap_or_default();

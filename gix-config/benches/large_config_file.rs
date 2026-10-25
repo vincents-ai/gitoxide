@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use gix_config::{parse::Events, File};
+use criterion::{Criterion, criterion_group, criterion_main};
+use gix_config::{File, parse::Events};
 use std::hint::black_box;
 
 fn gix_config(c: &mut Criterion) {
@@ -9,7 +9,7 @@ fn gix_config(c: &mut Criterion) {
 }
 
 fn parser(c: &mut Criterion) {
-    c.bench_function("Parser large config file", |b| {
+    c.bench_function("Parse large config file", |b| {
         b.iter(|| Events::try_from(black_box(CONFIG_FILE)).unwrap());
     });
 }

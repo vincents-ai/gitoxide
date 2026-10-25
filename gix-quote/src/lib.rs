@@ -13,7 +13,7 @@
 //! assert_eq!(unquoted.as_ref(), b"line\nbreak".as_bstr());
 //! assert_eq!(consumed, input.len());
 //! ```
-#![deny(rust_2018_idioms, missing_docs)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 ///
@@ -21,3 +21,6 @@ pub mod ansi_c;
 
 mod single;
 pub use single::single;
+
+mod display;
+pub use display::for_display;

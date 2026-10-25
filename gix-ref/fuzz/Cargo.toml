@@ -2,13 +2,13 @@
 name = "gix-ref-fuzz"
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-anyhow = "1.0.75"
+gix-error = { version = "^0.5.2", path = "../../gix-error" }
 arbitrary = { version = "1.3.2", features = ["derive"] }
 bstr = "1.8.0"
 gix-hash = { path = "../../gix-hash", features = ["sha1"] }

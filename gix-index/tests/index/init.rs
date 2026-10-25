@@ -1,10 +1,11 @@
-use std::{error::Error, path::Path};
+use gix_testtools::TestResult;
+use std::path::Path;
 
+use crate::{odb_at, scripted_fixture_read_only};
 use gix_index::State;
-use gix_testtools::scripted_fixture_read_only_standalone;
 
 #[test]
-fn from_tree() -> crate::Result {
+fn from_tree() -> gix_testtools::TestResult {
     let fixtures = [
         "make_index/v2.sh",
         "make_index/v2_more_files.sh",
@@ -13,14 +14,18 @@ fn from_tree() -> crate::Result {
     ];
 
     for fixture in fixtures {
-        let worktree_dir = scripted_fixture_read_only_standalone(fixture)?;
+        let worktree_dir = scripted_fixture_read_only(fixture)?;
 
         let tree_id = tree_id(&worktree_dir);
 
         let git_dir = worktree_dir.join(".git");
-        let expected_state =
-            gix_index::File::at(git_dir.join("index"), gix_hash::Kind::Sha1, false, Default::default())?;
-        let odb = gix_odb::at(git_dir.join("objects"))?;
+        let expected_state = gix_index::File::at(
+            git_dir.join("index"),
+            gix_testtools::object_hash(),
+            false,
+            Default::default(),
+        )?;
+        let odb = odb_at(git_dir.join("objects"))?;
         let actual_state = State::from_tree(&tree_id, &odb, Default::default())?;
 
         compare_states(&actual_state, &expected_state, fixture);
@@ -29,8 +34,11 @@ fn from_tree() -> crate::Result {
 }
 
 #[test]
-fn from_tree_validation() -> crate::Result {
-    let root = scripted_fixture_read_only_standalone("make_traverse_literal_separators.sh")?;
+fn from_tree_validation() -> TestResult {
+    let mut error_snapshots = Vec::new();
+    use gix_index::validate::path::component::Error;
+
+    let root = scripted_fixture_read_only("make_traverse_literal_separators.sh")?;
     for repo_name in [
         "traverse_dotdot_slashes",
         "traverse_dotgit_slashes",
@@ -40,15 +48,63 @@ fn from_tree_validation() -> crate::Result {
         let worktree_dir = root.join(repo_name);
         let tree_id = tree_id(&worktree_dir);
         let git_dir = worktree_dir.join(".git");
-        let odb = gix_odb::at(git_dir.join("objects"))?;
+        let odb = odb_at(git_dir.join("objects"))?;
 
-        let err = State::from_tree(&tree_id, &odb, Default::default()).unwrap_err();
-        assert_eq!(
-            err.source().expect("inner").to_string(),
-            r"Path separators like / or \ are not allowed",
-            r"Note that this effectively tests what would happen on Windows, where \ also isn't allowed"
+        let err = State::from_tree(&tree_id, &odb, Default::default())
+            .expect_err("tree entries with path separators must fail validation");
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+        assert!(err.is_validation(), "invalid path components are validation errors");
+        assert!(
+            matches!(err.downcast_any_ref::<Error>(), Some(Error::PathSeparator)),
+            "the concrete path-separator violation remains available beneath the index context"
+        );
+        assert!(
+            matches!(err.probable_cause().downcast_ref::<Error>(), Some(Error::PathSeparator)),
+            "conversion selects the concrete path violation rather than its classification marker"
         );
     }
+    insta::assert_debug_snapshot!(error_snapshots, "from tree validation", @r#"
+    [
+        The path "../outside" is invalid
+        
+        Caused by:
+            0: Path separators like / or \ are not allowed,
+        The path ".git/hooks/pre-commit" is invalid
+        
+        Caused by:
+            0: Path separators like / or \ are not allowed,
+        The path ".git\hooks\pre-commit" is invalid
+        
+        Caused by:
+            0: Path separators like / or \ are not allowed,
+        The path "..\outside" is invalid
+        
+        Caused by:
+            0: Path separators like / or \ are not allowed,
+    ]
+    "#);
+    Ok(())
+}
+
+#[test]
+fn from_tree_returns_file_directory_conflicts_until_fixed() -> gix_testtools::TestResult {
+    let worktree_dir = scripted_fixture_read_only("make_symlink_prefix_reuse_advisory.sh")?;
+    let tree_id = tree_id(&worktree_dir);
+    let odb = odb_at(worktree_dir.join(".git").join("objects"))?;
+
+    let actual_state = State::from_tree(&tree_id, &odb, Default::default())?;
+    actual_state.verify_entries()?;
+
+    let paths: Vec<_> = actual_state
+        .entries()
+        .iter()
+        .map(|entry| entry.path(&actual_state).to_owned())
+        .collect();
+    assert_eq!(
+        paths,
+        ["a", "a/post-checkout", "payload"],
+        "from_tree currently returns malformed file/directory conflicts; update this expected unfixed state once fixed"
+    );
     Ok(())
 }
 

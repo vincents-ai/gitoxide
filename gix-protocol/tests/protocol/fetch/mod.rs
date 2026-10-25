@@ -1,7 +1,9 @@
-use std::{borrow::Cow, io};
+use gix_error::Result;
+use std::io;
 
 use bstr::{BString, ByteSlice};
 use gix_protocol::{
+    command::Feature,
     fetch::{Arguments, Response},
     handshake,
 };
@@ -14,39 +16,14 @@ use _impl::{Action, DelegateBlocking, RefsAction};
 
 mod ref_map;
 
-mod error {
-    use std::io;
-
-    use gix_protocol::{fetch::response, handshake, ls_refs};
-    use gix_transport::client;
-
-    /// The error used in [`fetch()`][crate::fetch()].
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum Error {
-        #[error(transparent)]
-        Handshake(#[from] handshake::Error),
-        #[error("Could not access repository or failed to read streaming pack file")]
-        Io(#[from] io::Error),
-        #[error(transparent)]
-        Transport(#[from] client::Error),
-        #[error(transparent)]
-        LsRefs(#[from] ls_refs::Error),
-        #[error(transparent)]
-        Response(#[from] response::Error),
-    }
-}
-pub use error::Error;
-
 mod arguments;
 
 #[cfg(feature = "blocking-client")]
 type Cursor = std::io::Cursor<Vec<u8>>;
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 type Cursor = futures_lite::io::Cursor<Vec<u8>>;
 
-#[allow(clippy::result_large_err)]
-fn helper_unused(_action: gix_credentials::helper::Action) -> gix_credentials::protocol::Result {
+fn helper_unused(_action: gix_credentials::helper::Action) -> Result<Option<gix_credentials::protocol::Outcome>> {
     panic!("Call to credentials helper is unexpected")
 }
 
@@ -61,7 +38,7 @@ impl DelegateBlocking for CloneDelegate {
         &mut self,
         _version: gix_transport::Protocol,
         _server: &Capabilities,
-        _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+        _features: &mut Vec<Feature>,
         _refs: &[handshake::Ref],
     ) -> io::Result<Action> {
         if _refs.is_empty() {
@@ -112,7 +89,7 @@ impl DelegateBlocking for CloneRefInWantDelegate {
         &mut self,
         _version: gix_transport::Protocol,
         _server: &Capabilities,
-        _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+        _features: &mut Vec<Feature>,
         refs: &[handshake::Ref],
     ) -> io::Result<Action> {
         refs.clone_into(&mut self.refs);
@@ -153,7 +130,7 @@ impl DelegateBlocking for LsRemoteDelegate {
         &mut self,
         _version: gix_transport::Protocol,
         _server: &Capabilities,
-        _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+        _features: &mut Vec<Feature>,
         refs: &[handshake::Ref],
     ) -> io::Result<Action> {
         refs.clone_into(&mut self.refs);
@@ -173,8 +150,8 @@ impl DelegateBlocking for LsRemoteDelegate {
 mod blocking_io {
     use std::io;
 
-    use gix_features::progress::NestedProgress;
     use gix_protocol::{fetch::Response, handshake, handshake::Ref};
+    use gix_utils::progress::NestedProgress;
 
     use super::_impl::Delegate;
     use crate::fetch::{CloneDelegate, CloneRefInWantDelegate, LsRemoteDelegate};
@@ -224,14 +201,14 @@ mod blocking_io {
     }
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 mod async_io {
     use std::io;
 
     use async_trait::async_trait;
     use futures_io::AsyncBufRead;
-    use gix_features::progress::NestedProgress;
     use gix_protocol::{fetch::Response, handshake, handshake::Ref};
+    use gix_utils::progress::NestedProgress;
 
     use super::_impl::Delegate;
     use crate::fetch::{CloneDelegate, CloneRefInWantDelegate, LsRemoteDelegate};
@@ -288,7 +265,7 @@ pub fn oid(hex_sha: &str) -> gix_hash::ObjectId {
     gix_hash::ObjectId::from_hex(hex_sha.as_bytes()).expect("valid input")
 }
 
-#[cfg(feature = "async-client")]
+#[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
 pub fn transport<W: futures_io::AsyncWrite + Unpin>(
     out: W,
     path: &str,

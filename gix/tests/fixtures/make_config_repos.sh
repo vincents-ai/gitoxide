@@ -165,6 +165,56 @@ mkdir not-a-repo-with-files;
   touch this that
 )
 
+for format in sha1 sha256; do
+  git init "objectformat-$format-with-repository-format-v0"
+  (cd "objectformat-$format-with-repository-format-v0"
+    # use overrides to get a repository that Git refuses to open/edit.
+    cat <<EOF >>.git/config
+[core]
+	repositoryFormatVersion = 0
+[extensions]
+	objectFormat = $format
+EOF
+  )
+done
+
+git init repository-format-v2-with-objectformat-sha1
+(cd repository-format-v2-with-objectformat-sha1
+  # Future repository formats may change invariants beyond the object hash. Git
+  # refuses such repositories before interpreting extensions; gix should too.
+  cat <<EOF >>.git/config
+[core]
+	repositoryFormatVersion = 2
+[extensions]
+	objectFormat = sha1
+EOF
+)
+
+# relativeWorktrees is a v1-only boolean extension, even when set to false.
+# Format 0 requires SHA-1; the invalid v1 case uses the selected fixture hash.
+for value in false true; do
+  git init --object-format=sha1 "relative-worktrees-$value-with-repository-format-v0"
+  (cd "relative-worktrees-$value-with-repository-format-v0"
+    # Write invalid configurations directly so Git need not accept the extension.
+    cat <<EOF >>.git/config
+[core]
+	repositoryFormatVersion = 0
+[extensions]
+	relativeWorktrees = $value
+EOF
+  )
+done
+
+git init relative-worktrees-invalid-with-repository-format-v1
+(cd relative-worktrees-invalid-with-repository-format-v1
+  cat <<EOF >>.git/config
+[core]
+	repositoryFormatVersion = 1
+[extensions]
+	relativeWorktrees = invalid
+EOF
+)
+
 git init ssl-verify-disabled
 (cd ssl-verify-disabled
   git config http.sslVerify false

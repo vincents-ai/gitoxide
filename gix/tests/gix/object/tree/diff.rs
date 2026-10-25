@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use gix_testtools::TestResult;
 
 use gix::object::{blob::diff::lines, tree::diff::Change};
 use gix_object::{bstr::ByteSlice, tree::EntryKind};
@@ -6,7 +6,7 @@ use gix_object::{bstr::ByteSlice, tree::EntryKind};
 use crate::named_repo;
 
 #[test]
-fn changes_against_tree_modified() -> crate::Result {
+fn changes_against_tree_modified() -> TestResult {
     let repo = named_repo("make_diff_repo.sh")?;
     let from = tree_named(&repo, "@^{/c3-modification}~1");
     let to = tree_named(&repo, ":/c3-modification");
@@ -19,93 +19,119 @@ fn changes_against_tree_modified() -> crate::Result {
     ];
     let mut i = 0;
 
-    from.changes()?
-        .for_each_to_obtain_tree(&to, |change| -> Result<_, Infallible> {
-            let (expected_previous_entry_mode, expected_previous_data, expected_entry_mode, expected_data) =
-                expected_modifications[i];
+    from.changes()?.for_each_to_obtain_tree(&to, |change| {
+        let (expected_previous_entry_mode, expected_previous_data, expected_entry_mode, expected_data) =
+            expected_modifications[i];
 
-            assert!(
-                !change.location().is_empty(),
-                "without configuration the location field is set"
-            );
-            match change {
-                Change::Modification {
-                    previous_entry_mode,
-                    previous_id,
-                    entry_mode,
-                    id,
-                    ..
-                } => {
-                    assert_eq!(previous_entry_mode.kind(), expected_previous_entry_mode);
-                    assert_eq!(entry_mode.kind(), expected_entry_mode);
+        assert!(
+            !change.location().is_empty(),
+            "without configuration the location field is set"
+        );
+        match change {
+            Change::Modification {
+                previous_entry_mode,
+                previous_id,
+                entry_mode,
+                id,
+                ..
+            } => {
+                assert_eq!(previous_entry_mode.kind(), expected_previous_entry_mode);
+                assert_eq!(entry_mode.kind(), expected_entry_mode);
 
-                    if matches!(entry_mode.kind(), EntryKind::Tree) {
-                        i += 1;
-                        return Ok(std::ops::ControlFlow::Continue(()));
-                    }
-
-                    assert_eq!(previous_id.object().unwrap().data.as_bstr(), expected_previous_data);
-                    assert_eq!(id.object().unwrap().data.as_bstr(), expected_data);
+                if matches!(entry_mode.kind(), EntryKind::Tree) {
+                    i += 1;
+                    return Ok(std::ops::ControlFlow::Continue(()));
                 }
-                Change::Rewrite { .. } | Change::Deletion { .. } | Change::Addition { .. } => {
-                    unreachable!("only modification is expected")
-                }
+
+                assert_eq!(previous_id.object().unwrap().data.as_bstr(), expected_previous_data);
+                assert_eq!(id.object().unwrap().data.as_bstr(), expected_data);
             }
+            Change::Rewrite { .. } | Change::Deletion { .. } | Change::Addition { .. } => {
+                unreachable!("only modification is expected")
+            }
+        }
 
-            let mut diff = change.diff(&mut cache).expect("objects available");
-            let count = diff.line_counts().expect("no diff error").expect("no binary blobs");
-            assert_eq!(count.insertions, 1);
-            assert_eq!(count.removals, 0);
-            diff.lines(|hunk| {
-                match hunk {
-                    lines::Change::Deletion { .. } => unreachable!("there was no deletion"),
-                    lines::Change::Addition { lines } => {
-                        assert_eq!(lines.len(), 1);
-                        assert_eq!(
-                            lines[0],
-                            expected_data.as_bytes()[expected_previous_data.len()..]
-                                .as_bstr()
-                                .trim(),
-                            "diffed lines don't have newlines anymore"
-                        );
-                    }
-                    lines::Change::Modification { .. } => unreachable!("there was no modification"),
+        let mut diff = change.diff(&mut cache)?;
+        let count = diff.line_counts()?.expect("no binary blobs");
+        assert_eq!(count.insertions, 1);
+        assert_eq!(count.removals, 0);
+        diff.lines(|hunk| {
+            match hunk {
+                lines::Change::Deletion { .. } => unreachable!("there was no deletion"),
+                lines::Change::Addition { lines } => {
+                    assert_eq!(lines.len(), 1);
+                    assert_eq!(
+                        lines[0],
+                        expected_data.as_bytes()[expected_previous_data.len()..]
+                            .as_bstr()
+                            .trim(),
+                        "diffed lines don't have newlines anymore"
+                    );
                 }
-                Ok::<_, Infallible>(())
-            })
-            .expect("infallible");
-
-            i += 1;
-            Ok(std::ops::ControlFlow::Continue(()))
+                lines::Change::Modification { .. } => unreachable!("there was no modification"),
+            }
+            Ok(())
         })?;
+
+        i += 1;
+        Ok(std::ops::ControlFlow::Continue(()))
+    })?;
     assert_eq!(i, 3);
 
     let actual = repo.diff_tree_to_tree(&from, &to, None)?;
-    insta::assert_debug_snapshot!(actual, @r#"
-    [
-        Modification {
-            location: "a",
-            previous_entry_mode: EntryMode(0o100644),
-            previous_id: Sha1(78981922613b2afb6025042ff6bd878ac1994e85),
-            entry_mode: EntryMode(0o100644),
-            id: Sha1(b4f17b61de71d9b2e54ac9e62b1629ae2d97a6a7),
-        },
-        Modification {
-            location: "dir",
-            previous_entry_mode: EntryMode(0o40000),
-            previous_id: Sha1(e5c63aefe4327cb1c780c71966b678ce8e4225da),
-            entry_mode: EntryMode(0o40000),
-            id: Sha1(c7ac5f82f536976f3561c9999b5f11e5893358be),
-        },
-        Modification {
-            location: "dir/c",
-            previous_entry_mode: EntryMode(0o100644),
-            previous_id: Sha1(6695780ceb14b05e076a99bbd2babf34723b3464),
-            entry_mode: EntryMode(0o100644),
-            id: Sha1(40006fcef15a8853a1b7ae186d93b7d680fd29cf),
-        },
-    ]
-    "#);
+    match repo.object_hash() {
+        gix::hash::Kind::Sha1 => insta::assert_debug_snapshot!(actual, @r#"
+        [
+            Modification {
+                location: "a",
+                previous_entry_mode: EntryMode(0o100644),
+                previous_id: Sha1(78981922613b2afb6025042ff6bd878ac1994e85),
+                entry_mode: EntryMode(0o100644),
+                id: Sha1(b4f17b61de71d9b2e54ac9e62b1629ae2d97a6a7),
+            },
+            Modification {
+                location: "dir",
+                previous_entry_mode: EntryMode(0o40000),
+                previous_id: Sha1(e5c63aefe4327cb1c780c71966b678ce8e4225da),
+                entry_mode: EntryMode(0o40000),
+                id: Sha1(c7ac5f82f536976f3561c9999b5f11e5893358be),
+            },
+            Modification {
+                location: "dir/c",
+                previous_entry_mode: EntryMode(0o100644),
+                previous_id: Sha1(6695780ceb14b05e076a99bbd2babf34723b3464),
+                entry_mode: EntryMode(0o100644),
+                id: Sha1(40006fcef15a8853a1b7ae186d93b7d680fd29cf),
+            },
+        ]
+        "#),
+        gix::hash::Kind::Sha256 => insta::assert_debug_snapshot!(actual, @r#"
+        [
+            Modification {
+                location: "a",
+                previous_entry_mode: EntryMode(0o100644),
+                previous_id: Sha256(f8625e43f9e04f24291f77cdbe4c71b3c2a3b0003f60419b3ed06a058d766c8b),
+                entry_mode: EntryMode(0o100644),
+                id: Sha256(6eba3a291223ebd59db7f157409b70bb1f929be92ed8df0fba98cb81852ff378),
+            },
+            Modification {
+                location: "dir",
+                previous_entry_mode: EntryMode(0o40000),
+                previous_id: Sha256(0d8c11bd683002c6f7c29c94e952cc3ebe2e0e10bd781846285998a509ebd746),
+                entry_mode: EntryMode(0o40000),
+                id: Sha256(730477dc62b02d7046105a95e8c37dc204943f24c70da12d33a88012ac7d2613),
+            },
+            Modification {
+                location: "dir/c",
+                previous_entry_mode: EntryMode(0o100644),
+                previous_id: Sha256(b7bb7be9f73f0d01719f57dcb697689692e2ae9737f4bb59216902b9a0e2adb1),
+                entry_mode: EntryMode(0o100644),
+                id: Sha256(8cf8e3576bb1c632c9f2e1196d2aa6b1ae36c6f651d7619dca4894b784065819),
+            },
+        ]
+        "#),
+        _ => unreachable!(),
+    }
 
     assert_eq!(
         from.changes()?.stats(&to)?,
@@ -121,12 +147,13 @@ fn changes_against_tree_modified() -> crate::Result {
 }
 
 mod track_rewrites {
-    use std::{collections::HashMap, convert::Infallible};
+    use gix_testtools::TestResult;
+    use std::collections::HashMap;
 
     use gix::{
         diff::{
-            rewrites::{Copies, CopySource},
             Rewrites,
+            rewrites::{Copies, CopySource},
         },
         object::tree::diff::Change,
     };
@@ -135,11 +162,12 @@ mod track_rewrites {
     use crate::{object::tree::diff::tree_named, util::named_subrepo_opts};
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Fails on some Window systems, like the fixture doesn't get set up correctly."
-    )]
-    fn jj_realistic_needs_to_be_more_clever() -> crate::Result {
+    fn jj_realistic_needs_to_be_more_clever() -> TestResult {
+        // The test case only works (and is only needed) for SHA-1.
+        // Ideally this can be ported to SHA-256 once rename tracking is par with Git.
+        if gix_testtools::object_hash() == gix::hash::Kind::Sha256 {
+            return Ok(());
+        }
         let repo = named_subrepo_opts("make_diff_repos.sh", "jj-trackcopy-1", gix::open::Options::isolated())?;
 
         let mut expected = HashMap::<&BStr, (&BStr, u32)>::new();
@@ -176,7 +204,7 @@ mod track_rewrites {
             .options(|opts| {
                 opts.track_rewrites(rewrites.into());
             })
-            .for_each_to_obtain_tree(&to, |change| -> Result<_, Infallible> {
+            .for_each_to_obtain_tree(&to, |change| {
                 if let Change::Rewrite {
                     source_location,
                     diff: Some(diff),
@@ -195,7 +223,7 @@ mod track_rewrites {
         assert_eq!(expected, HashMap::new());
         let out = out.expect("tracking enabled");
         assert_eq!(
-            out.num_similarity_checks, 21,
+            out.num_similarity_checks, 23,
             "this probably increases once the algorithm improves"
         );
         assert_eq!(
@@ -414,11 +442,12 @@ mod track_rewrites {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "Fails on some Window systems, like the fixture doesn't get set up correctly."
-    )]
-    fn jj_realistic_directory_rename() -> crate::Result {
+    fn jj_realistic_directory_rename() -> TestResult {
+        // The test case only works (and is only needed) for SHA-1.
+        // Ideally this can be ported to SHA-256 once rename tracking is par with Git.
+        if gix_testtools::object_hash() == gix::hash::Kind::Sha256 {
+            return Ok(());
+        }
         let repo = named_subrepo_opts("make_diff_repos.sh", "jj-trackcopy-1", gix::open::Options::isolated())?;
 
         let from = tree_named(&repo, "@~1");

@@ -1,9 +1,10 @@
+use crate::TestResult;
 use std::{fs, path::PathBuf};
 
 use gix_config::{File, Source};
 use gix_testtools::tempfile::tempdir;
 
-use crate::file::cow_str;
+use crate::file::bstring;
 
 /// Escapes backslash when writing a path as string so that it is a valid windows path
 pub(crate) fn escape_backslashes(path: impl AsRef<std::path::Path>) -> String {
@@ -17,8 +18,26 @@ mod from_path_no_includes {
         let config_path = dir.path().join("config");
 
         let err = gix_config::File::from_path_no_includes(config_path, gix_config::Source::Local).unwrap_err();
-        assert!(
-            matches!(err,  gix_config::file::init::from_paths::Error::Io{source: io_error, ..} if io_error.kind() == std::io::ErrorKind::NotFound)
+        #[cfg(not(windows))]
+        insta::assert_debug_snapshot!(gix_testtools::redact_debug_snapshot(&(err), &[(&(dir.path()).to_string_lossy(), "<tmp>")]), "file not found", @r#"
+        The configuration file at "<tmp>/config" could not be inspected
+
+        Caused by:
+            0: NotFound
+        "#);
+        #[cfg(windows)]
+        insta::assert_debug_snapshot!(gix_testtools::redact_debug_snapshot(&(err), &[(&(dir.path()).to_string_lossy(), "<tmp>")]), "file not found", @r#"
+        The configuration file at "<tmp>/config" could not be inspected
+
+        Caused by:
+            0: I/O error (NotFound)
+            1: "<tmp>/config" does not exist.
+        "#);
+        assert_eq!(
+            err.downcast_any_ref::<std::io::Error>()
+                .expect("the I/O source is retained")
+                .kind(),
+            std::io::ErrorKind::NotFound
         );
     }
 
@@ -30,13 +49,13 @@ mod from_path_no_includes {
 
         let config = gix_config::File::from_path_no_includes(config_path, gix_config::Source::Local).unwrap();
 
-        assert_eq!(config.raw_value("core.boolean").unwrap().as_ref(), "true");
+        assert_eq!(config.raw_value("core.boolean").unwrap(), "true");
         assert_eq!(config.num_values(), 1);
     }
 }
 
 #[test]
-fn multiple_paths_single_value() -> crate::Result {
+fn multiple_paths_single_value() -> TestResult {
     let dir = tempdir()?;
 
     let a_path = dir.path().join("a");
@@ -54,9 +73,9 @@ fn multiple_paths_single_value() -> crate::Result {
     let paths = vec![a_path, b_path, c_path, d_path];
     let config = File::from_paths_metadata(into_meta(paths), Default::default())?.expect("non-empty");
 
-    assert_eq!(config.boolean("core.a"), Some(Ok(false)));
-    assert_eq!(config.boolean("core.b"), Some(Ok(true)));
-    assert_eq!(config.boolean("core.c"), Some(Ok(true)));
+    assert_eq!(config.boolean("core.a")?, Some(false));
+    assert_eq!(config.boolean("core.b")?, Some(true));
+    assert_eq!(config.boolean("core.c")?, Some(true));
     assert_eq!(config.num_values(), 4);
     assert_eq!(config.sections().count(), 4, "each value is in a dedicated section");
 
@@ -64,7 +83,7 @@ fn multiple_paths_single_value() -> crate::Result {
 }
 
 #[test]
-fn frontmatter_is_maintained_in_multiple_files() -> crate::Result {
+fn frontmatter_is_maintained_in_multiple_files() -> TestResult {
     let dir = tempdir()?;
 
     let a_path = dir.path().join("a");
@@ -89,7 +108,7 @@ fn frontmatter_is_maintained_in_multiple_files() -> crate::Result {
     assert_eq!(config.strings("core.a").expect("present").len(), 1, "precondition");
     assert_eq!(config.strings("core.b").expect("present").len(), 1, "precondition");
 
-    config.append(config.clone());
+    config.append(config.clone())?;
     assert_eq!(
         config.to_string(),
         ";before a\n[core]\na = true\n;before b\n [core]\nb\n# nothing in c\n; nothing in d\n;before a\n[core]\na = true\n;before b\n [core]\nb\n# nothing in c\n; nothing in d\n",
@@ -110,7 +129,7 @@ fn frontmatter_is_maintained_in_multiple_files() -> crate::Result {
         config
             .frontmatter()
             .expect("present")
-            .map(ToString::to_string)
+            .map(|event| event.to_string())
             .collect::<Vec<_>>()
             .join(""),
         ";before a\n"
@@ -125,7 +144,7 @@ fn frontmatter_is_maintained_in_multiple_files() -> crate::Result {
 }
 
 #[test]
-fn multiple_paths_multi_value_and_filter() -> crate::Result {
+fn multiple_paths_multi_value_and_filter() -> TestResult {
     let dir = tempdir()?;
 
     let a_path = dir.path().join("a");
@@ -161,31 +180,31 @@ fn multiple_paths_multi_value_and_filter() -> crate::Result {
 
     assert_eq!(
         config.strings("core.key"),
-        Some(vec![cow_str("a"), cow_str("b"), cow_str("c"),])
+        Some(vec![bstring("a"), bstring("b"), bstring("c"),])
     );
 
     assert_eq!(
         config.string_filter("core.key", |m| m.source == Source::System),
-        Some(cow_str("a")),
+        Some(bstring("a")),
         "the filter discards all values with higher priority"
     );
     assert_eq!(
         config.string_filter("core.key", |m| m.source == Source::System),
-        Some(cow_str("a")),
+        Some(bstring("a")),
     );
 
     assert_eq!(
         config.strings_filter("core.key", |m| m.source == Source::Git || m.source == Source::User),
-        Some(vec![cow_str("b"), cow_str("c")])
+        Some(vec![bstring("b"), bstring("c")])
     );
     assert_eq!(
         config.strings_filter("core.key", |m| m.source == Source::Git || m.source == Source::User),
-        Some(vec![cow_str("b"), cow_str("c")])
+        Some(vec![bstring("b"), bstring("c")])
     );
 
     assert_eq!(
         config.strings_by("include", None, "path"),
-        Some(vec![cow_str("d_path"), cow_str("e_path")])
+        Some(vec![bstring("d_path"), bstring("e_path")])
     );
 
     assert_eq!(config.num_values(), 5);

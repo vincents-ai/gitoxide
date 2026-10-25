@@ -1,3 +1,5 @@
+use gix_error::ErrorExt;
+use gix_error::Result;
 use std::{
     io,
     ops::{Deref, DerefMut},
@@ -7,9 +9,8 @@ use bstr::ByteSlice;
 
 pub use super::sidebands::WithSidebands;
 use crate::{
-    decode,
+    MAX_LINE_LEN, PacketLineRef, U16_HEX_BYTES, decode,
     read::{ExhaustiveOutcome, ProgressAction, StreamingPeekableIterState},
-    PacketLineRef, MAX_LINE_LEN, U16_HEX_BYTES,
 };
 
 /// Read pack lines one after another, without consuming more than needed from the underlying
@@ -34,8 +35,11 @@ where
         }
     }
 
-    fn read_line_inner<'a>(reader: &mut T, buf: &'a mut [u8]) -> io::Result<Result<PacketLineRef<'a>, decode::Error>> {
-        let (hex_bytes, data_bytes) = buf.split_at_mut(4);
+    fn read_line_inner<'a>(reader: &mut T, buf: &'a mut [u8]) -> io::Result<Result<PacketLineRef<'a>>> {
+        if buf.len() < U16_HEX_BYTES {
+            return Ok(Err(decode::not_enough_data(U16_HEX_BYTES - buf.len()).raise()));
+        }
+        let (hex_bytes, data_bytes) = buf.split_at_mut(U16_HEX_BYTES);
         reader.read_exact(hex_bytes)?;
         let num_data_bytes = match decode::hex_prefix(hex_bytes) {
             Ok(decode::PacketLineOrWantedSize::Line(line)) => return Ok(Ok(line)),
@@ -43,9 +47,9 @@ where
             Err(err) => return Ok(Err(err)),
         };
         if num_data_bytes > data_bytes.len() {
-            return Ok(Err(decode::Error::DataLengthLimitExceeded {
-                length_in_bytes: num_data_bytes + U16_HEX_BYTES,
-            }));
+            return Ok(Err(
+                decode::data_length_limit_exceeded(num_data_bytes + U16_HEX_BYTES).validation_error()
+            ));
         }
 
         let (data_bytes, _) = data_bytes.split_at_mut(num_data_bytes);
@@ -73,7 +77,7 @@ where
                 Ok(Ok(line)) => {
                     if trace {
                         match line {
-                            #[allow(unused_variables)]
+                            #[allow(unused_variables, reason = "Used when tracing is enabled at compile time.")]
                             PacketLineRef::Data(d) => {
                                 gix_trace::trace!("<< {}", d.as_bstr().trim().as_bstr());
                             }
@@ -92,16 +96,14 @@ where
                         let stopped_at = delimiters.iter().find(|l| **l == line).copied();
                         buf.clear();
                         return (true, stopped_at, None);
-                    } else if fail_on_err_lines {
-                        if let Some(err) = line.check_error() {
-                            let err = err.0.as_bstr().to_owned();
-                            buf.clear();
-                            return (
-                                true,
-                                None,
-                                Some(Err(io::Error::other(crate::read::Error { message: err }))),
-                            );
-                        }
+                    } else if fail_on_err_lines && let Some(err) = line.check_error() {
+                        let err = err.0.as_bstr().to_owned();
+                        buf.clear();
+                        return (
+                            true,
+                            None,
+                            Some(Err(io::Error::other(crate::read::Error { message: err }))),
+                        );
                     }
                     let len = line.as_slice().map_or(U16_HEX_BYTES, |s| s.len() + U16_HEX_BYTES);
                     if buf_resize {
@@ -129,7 +131,7 @@ where
     ///  * natural EOF
     ///  * ERR packet line encountered if [`fail_on_err_lines()`](StreamingPeekableIterState::fail_on_err_lines()) is true.
     ///  * A `delimiter` packet line encountered
-    pub fn read_line(&mut self) -> Option<io::Result<Result<PacketLineRef<'_>, decode::Error>>> {
+    pub fn read_line(&mut self) -> Option<io::Result<Result<PacketLineRef<'_>>>> {
         let state = &mut self.state;
         if state.is_done {
             return None;
@@ -160,7 +162,7 @@ where
     /// was encountered.
     ///
     /// Multiple calls to peek will return the same packet line, if there is one.
-    pub fn peek_line(&mut self) -> Option<io::Result<Result<PacketLineRef<'_>, decode::Error>>> {
+    pub fn peek_line(&mut self) -> Option<io::Result<Result<PacketLineRef<'_>>>> {
         let state = &mut self.state;
         if state.is_done {
             return None;
@@ -208,7 +210,7 @@ where
     /// Same as [`as_read_with_sidebands(…)`](StreamingPeekableIter::as_read_with_sidebands()), but for channels without side band support.
     ///
     /// Due to the preconfigured function type this method can be called without 'turbofish'.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn as_read(&mut self) -> WithSidebands<'_, T, fn(bool, &[u8]) -> ProgressAction> {
         WithSidebands::new(self)
     }

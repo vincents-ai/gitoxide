@@ -4,7 +4,7 @@ use gix_hash::ObjectId;
 use gix_object::bstr::{BStr, BString};
 use memmap2::Mmap;
 
-use crate::{file, transaction::RefEdit, FullNameRef, Namespace};
+use crate::{FullNameRef, Namespace, file, transaction::RefEdit};
 
 #[derive(Debug)]
 enum Backing {
@@ -21,7 +21,7 @@ enum Backing {
 pub struct Buffer {
     data: Backing,
     /// The hash kind to expect when parsing packed references.
-    hash_kind: gix_hash::Kind,
+    object_hash: gix_hash::Kind,
     /// The offset to the first record, how many bytes to skip past the header
     offset: usize,
     /// The path from which we were loaded
@@ -38,7 +38,7 @@ pub(crate) struct Transaction {
     buffer: Option<file::packed::SharedBufferSnapshot>,
     edits: Option<Vec<Edit>>,
     lock: Option<gix_lock::File>,
-    #[allow(dead_code)] // It just has to be kept alive, hence no reads
+    // It just has to be kept alive, hence no reads
     closed_lock: Option<gix_lock::Marker>,
     precompose_unicode: bool,
     /// The namespace to use when preparing or writing refs
@@ -78,7 +78,7 @@ pub struct Iter<'a> {
     /// The position at which to parse the next reference
     cursor: &'a [u8],
     /// The hash kind to expect when parsing packed references.
-    hash_kind: gix_hash::Kind,
+    object_hash: gix_hash::Kind,
     /// The next line, starting at 1
     current_line: usize,
     /// If set, references returned will match the prefix, the first failed match will stop all iteration.

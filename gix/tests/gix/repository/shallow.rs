@@ -1,8 +1,9 @@
+use gix_testtools::{Result, TestResult};
 use serial_test::parallel;
 
 use crate::util::{hex_to_id, named_subrepo_opts};
 
-fn shallow_ids(repo: &gix::Repository) -> crate::Result<Vec<gix::ObjectId>> {
+fn shallow_ids(repo: &gix::Repository) -> Result<Vec<gix::ObjectId>> {
     let commits = repo.shallow_commits()?.expect("present");
     Ok(std::iter::once(commits.head)
         .chain(commits.tail.iter().copied())
@@ -11,17 +12,17 @@ fn shallow_ids(repo: &gix::Repository) -> crate::Result<Vec<gix::ObjectId>> {
 
 #[test]
 #[parallel]
-fn no() -> crate::Result {
+fn no() -> TestResult {
     for name in ["base", "empty"] {
         let repo = named_subrepo_opts("make_shallow_repo.sh", name, crate::restricted())?;
-        assert!(!repo.is_shallow());
+        assert!(!repo.is_shallow()?);
         assert!(repo.shallow_commits()?.is_none());
         let commits: Vec<_> = repo
             .head_id()?
             .ancestors()
             .all()?
             .map(|c| c.map(|c| c.id))
-            .collect::<Result<_, _>>()?;
+            .collect::<std::result::Result<_, _>>()?;
         let expected = if name == "base" {
             vec![
                 hex_to_id("30887839de28edf7ab66c860e5c58b4d445f6b12"),
@@ -38,10 +39,10 @@ fn no() -> crate::Result {
 
 #[test]
 #[parallel]
-fn yes() -> crate::Result {
+fn yes() -> TestResult {
     for name in ["shallow.git", "shallow"] {
         let repo = named_subrepo_opts("make_shallow_repo.sh", name, crate::restricted())?;
-        assert!(repo.is_shallow());
+        assert!(repo.is_shallow()?);
         assert_eq!(
             shallow_ids(&repo)?,
             [hex_to_id("30887839de28edf7ab66c860e5c58b4d445f6b12")]
@@ -51,6 +52,7 @@ fn yes() -> crate::Result {
 }
 
 mod traverse {
+    use gix_testtools::TestResult;
     use gix_traverse::commit::simple::CommitTimeOrder;
     use serial_test::parallel;
 
@@ -58,7 +60,7 @@ mod traverse {
 
     #[test]
     #[parallel]
-    fn boundary_is_detected_triggering_no_error() -> crate::Result {
+    fn boundary_is_detected_triggering_no_error() -> TestResult {
         for sorting in [
             gix::revision::walk::Sorting::BreadthFirst,
             gix::revision::walk::Sorting::ByCommitTime(CommitTimeOrder::NewestFirst),
@@ -77,7 +79,7 @@ mod traverse {
                         .sorting(sorting)
                         .all()?
                         .map(|c| c.map(|c| c.id))
-                        .collect::<Result<_, _>>()?;
+                        .collect::<std::result::Result<_, _>>()?;
                     assert_eq!(commits, [hex_to_id("30887839de28edf7ab66c860e5c58b4d445f6b12")]);
                 }
             }
@@ -87,7 +89,7 @@ mod traverse {
 
     #[test]
     #[parallel]
-    fn complex_graphs_can_be_iterated_despite_multiple_shallow_boundaries() -> crate::Result {
+    fn complex_graphs_can_be_iterated_despite_multiple_shallow_boundaries() -> TestResult {
         let base = gix_path::realpath(gix_testtools::scripted_fixture_read_only("make_remote_repos.sh")?.join("base"))?;
         let shallow_base = gix_testtools::scripted_fixture_read_only_with_args_single_archive(
             "make_complex_shallow_repo.sh",
@@ -96,14 +98,23 @@ mod traverse {
         for toggle in [false, true] {
             for name in ["shallow.git", "shallow"] {
                 let repo = gix::open_opts(shallow_base.join(name), crate::restricted())?;
-                assert_eq!(
-                    super::shallow_ids(&repo)?,
-                    [
+                // Shallow commits are sorted which is why there's different expectations depending
+                // on the hash the test is run with.
+                let expected_shallow_ids = match gix_testtools::object_hash() {
+                    gix_hash::Kind::Sha1 => [
                         hex_to_id("27e71576a6335294aa6073ab767f8b36bdba81d0"),
                         hex_to_id("82024b2ef7858273337471cbd1ca1cedbdfd5616"),
                         hex_to_id("b5152869aedeb21e55696bb81de71ea1bb880c85"),
-                    ]
-                );
+                    ],
+                    gix_hash::Kind::Sha256 => [
+                        hex_to_id("82024b2ef7858273337471cbd1ca1cedbdfd5616"),
+                        hex_to_id("b5152869aedeb21e55696bb81de71ea1bb880c85"),
+                        hex_to_id("27e71576a6335294aa6073ab767f8b36bdba81d0"),
+                    ],
+
+                    _ => unimplemented!(),
+                };
+                assert_eq!(super::shallow_ids(&repo)?, expected_shallow_ids);
                 let commits: Vec<_> = repo
                     .head_id()?
                     .ancestors()
@@ -111,7 +122,7 @@ mod traverse {
                     .sorting(gix::revision::walk::Sorting::ByCommitTime(CommitTimeOrder::NewestFirst))
                     .all()?
                     .map(|c| c.map(|c| c.id))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<std::result::Result<_, _>>()?;
                 assert_eq!(
                     commits,
                     [
@@ -127,13 +138,36 @@ mod traverse {
                     .collect::<Vec<_>>()
                 );
 
-                // should be
-                // *   f99771f - (HEAD -> main, origin/main, origin/HEAD) A (18 years ago) <A U Thor>
-                // | * 2d9d136 - C (18 years ago) <A U Thor>
-                // *-. | dfd0954 - (tag: b-tag) B (18 years ago) <A U Thor>
-                // | | * 27e7157 - (grafted) F (18 years ago) <A U Thor>
-                //     | * b515286 - (grafted) E (18 years ago) <A U Thor>
-                //     * 82024b2 - (grafted) D (18 years ago) <A U Thor>
+                if !toggle && name == "shallow" {
+                    let graph = gix_testtools::git(repo.git_dir(), "log --graph --oneline")?;
+                    match gix_testtools::object_hash() {
+                        gix_hash::Kind::Sha1 => insta::assert_snapshot!(graph, @r"
+*   f99771f A
+|\  
+| * 2d9d136 C
+| |   
+|  \  
+*-. | dfd0954 B
+|\ \| 
+| | * 27e7157 F
+| * b515286 E
+* 82024b2 D
+"),
+                        gix_hash::Kind::Sha256 => insta::assert_snapshot!(graph, @r"
+*   e36613f A
+|\  
+| * 1e485b4 C
+| |   
+|  \  
+*-. | 94c0c58 B
+|\ \| 
+| | * c2eec0d F
+| * a5d87b4 E
+* 125ce6c D
+"),
+                        _ => unimplemented!(),
+                    }
+                }
             }
         }
         Ok(())

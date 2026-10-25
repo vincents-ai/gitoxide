@@ -1,6 +1,7 @@
+use gix_error::{Result, bail};
 use std::{io::Read, path::PathBuf};
 
-use crate::blob::{builtin_driver, PlatformRef, Resolution};
+use crate::blob::{PlatformRef, Resolution, builtin_driver};
 
 /// Options for the use in the [`PlatformRef::merge()`] call.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
@@ -15,30 +16,16 @@ pub struct Options {
     pub text: builtin_driver::text::Options,
 }
 
-/// The error returned by [`PlatformRef::merge()`].
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error(transparent)]
-    PrepareExternalDriver(#[from] inner::prepare_external_driver::Error),
-    #[error("Failed to launch external merge driver: {cmd}")]
-    SpawnExternalDriver { cmd: String, source: std::io::Error },
-    #[error("External merge driver failed with non-zero exit status {status:?}: {cmd}")]
-    ExternalDriverFailure {
-        status: std::process::ExitStatus,
-        cmd: String,
-    },
-    #[error("IO failed when dealing with merge-driver output")]
-    ExternalDriverIO(#[from] std::io::Error),
-}
-
 /// The product of a [`PlatformRef::prepare_external_driver()`] operation.
 ///
 /// This type allows to creation of [`std::process::Command`], ready to run, with `stderr` and `stdout` set to *inherit*,
 /// but `stdin` closed.
 /// It's expected to leave its result in the file substituted at `current` which is then supposed to be read back from there.
 // TODO: remove dead-code annotation
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "the tempfile handles are retained for RAII cleanup while the external merge command runs"
+)]
 pub struct Command {
     /// The pre-configured command
     cmd: std::process::Command,
@@ -56,6 +43,7 @@ pub struct Command {
 pub(super) mod inner {
     ///
     pub mod prepare_external_driver {
+        use gix_error::Result;
         use std::{
             io::Write,
             ops::{Deref, DerefMut},
@@ -67,35 +55,10 @@ pub(super) mod inner {
         use gix_tempfile::{AutoRemove, ContainingDirectory};
 
         use crate::blob::{
-            builtin_driver,
+            BuiltinDriver, Driver, PlatformRef, ResourceKind, builtin_driver,
             builtin_driver::text::Conflict,
-            platform::{merge, DriverChoice},
-            BuiltinDriver, Driver, PlatformRef, ResourceKind,
+            platform::{DriverChoice, merge},
         };
-
-        /// The error returned by [PlatformRef::prepare_external_driver()](PlatformRef::prepare_external_driver()).
-        #[derive(Debug, thiserror::Error)]
-        #[allow(missing_docs)]
-        pub enum Error {
-            #[error("The resource of kind {kind:?} was too large to be processed")]
-            ResourceTooLarge { kind: ResourceKind },
-            #[error(
-                "Tempfile to store content of '{rela_path}' ({kind:?}) for passing to external merge command could not be created"
-            )]
-            CreateTempfile {
-                rela_path: BString,
-                kind: ResourceKind,
-                source: std::io::Error,
-            },
-            #[error(
-                "Could not write content of '{rela_path}' ({kind:?}) to tempfile for passing to external merge command"
-            )]
-            WriteTempfile {
-                rela_path: BString,
-                kind: ResourceKind,
-                source: std::io::Error,
-            },
-        }
 
         /// Plumbing
         impl<'parent> PlatformRef<'parent> {
@@ -122,7 +85,9 @@ pub(super) mod inner {
                     other,
                 }: builtin_driver::text::Labels<'_>,
                 context: gix_command::Context,
-            ) -> Result<merge::Command, Error> {
+            ) -> Result<merge::Command> {
+                use gix_error::{OptionExt, ResultExt, message, validation};
+
                 fn write_data(
                     data: &[u8],
                     directory: &Path,
@@ -137,14 +102,23 @@ pub(super) mod inner {
                     Ok((file, path))
                 }
 
-                let base = self.ancestor.data.as_slice().ok_or(Error::ResourceTooLarge {
-                    kind: ResourceKind::CommonAncestorOrBase,
+                let base = self.ancestor.data.as_slice().ok_or_raise(|| {
+                    validation(format!(
+                        "The resource of kind {:?} was too large to be processed",
+                        ResourceKind::CommonAncestorOrBase
+                    ))
                 })?;
-                let ours = self.current.data.as_slice().ok_or(Error::ResourceTooLarge {
-                    kind: ResourceKind::CurrentOrOurs,
+                let ours = self.current.data.as_slice().ok_or_raise(|| {
+                    validation(format!(
+                        "The resource of kind {:?} was too large to be processed",
+                        ResourceKind::CurrentOrOurs
+                    ))
                 })?;
-                let theirs = self.other.data.as_slice().ok_or(Error::ResourceTooLarge {
-                    kind: ResourceKind::OtherOrTheirs,
+                let theirs = self.other.data.as_slice().ok_or_raise(|| {
+                    validation(format!(
+                        "The resource of kind {:?} was too large to be processed",
+                        ResourceKind::OtherOrTheirs
+                    ))
                 })?;
 
                 let tmp_dir = context
@@ -152,20 +126,26 @@ pub(super) mod inner {
                     .as_deref()
                     .or(context.git_dir.as_deref())
                     .unwrap_or(Path::new(""));
-                let (base_tmp, base_path) = write_data(base, tmp_dir).map_err(|err| Error::CreateTempfile {
-                    rela_path: self.ancestor.rela_path.into(),
-                    kind: ResourceKind::CommonAncestorOrBase,
-                    source: err,
+                let (base_tmp, base_path) = write_data(base, tmp_dir).or_raise(|| {
+                    message!(
+                        "Tempfile to store content of '{}' ({:?}) for passing to external merge command could not be created",
+                        self.ancestor.rela_path,
+                        ResourceKind::CommonAncestorOrBase
+                    )
                 })?;
-                let (ours_tmp, ours_path) = write_data(ours, tmp_dir).map_err(|err| Error::CreateTempfile {
-                    rela_path: self.current.rela_path.into(),
-                    kind: ResourceKind::CurrentOrOurs,
-                    source: err,
+                let (ours_tmp, ours_path) = write_data(ours, tmp_dir).or_raise(|| {
+                    message!(
+                        "Tempfile to store content of '{}' ({:?}) for passing to external merge command could not be created",
+                        self.current.rela_path,
+                        ResourceKind::CurrentOrOurs
+                    )
                 })?;
-                let (theirs_tmp, theirs_path) = write_data(theirs, tmp_dir).map_err(|err| Error::CreateTempfile {
-                    rela_path: self.other.rela_path.into(),
-                    kind: ResourceKind::OtherOrTheirs,
-                    source: err,
+                let (theirs_tmp, theirs_path) = write_data(theirs, tmp_dir).or_raise(|| {
+                    message!(
+                        "Tempfile to store content of '{}' ({:?}) for passing to external merge command could not be created",
+                        self.other.rela_path,
+                        ResourceKind::OtherOrTheirs
+                    )
                 })?;
 
                 let mut cmd = BString::from(Vec::with_capacity(merge_command.len()));
@@ -175,15 +155,15 @@ pub(super) mod inner {
                     let token = if count > 1 {
                         match token.first() {
                             Some(&b'O') => {
-                                cmd.push_str(gix_path::into_bstr(&base_path).as_ref());
+                                cmd.push_str(gix_path::into_bstr(&base_path)?.as_ref());
                                 &token[1..]
                             }
                             Some(&b'A') => {
-                                cmd.push_str(gix_path::into_bstr(&ours_path).as_ref());
+                                cmd.push_str(gix_path::into_bstr(&ours_path)?.as_ref());
                                 &token[1..]
                             }
                             Some(&b'B') => {
-                                cmd.push_str(gix_path::into_bstr(&theirs_path).as_ref());
+                                cmd.push_str(gix_path::into_bstr(&theirs_path)?.as_ref());
                                 &token[1..]
                             }
                             Some(&b'L') => {
@@ -225,13 +205,13 @@ pub(super) mod inner {
                 }
 
                 Ok(merge::Command {
-                    cmd: gix_command::prepare(gix_path::from_bstring(cmd))
+                    cmd: gix_command::prepare(gix_path::from_bstring(cmd)?)
                         .with_context(context)
                         .command_may_be_shell_script()
                         .stdin(Stdio::null())
                         .stdout(Stdio::inherit())
                         .stderr(Stdio::inherit())
-                        .into(),
+                        .try_into()?,
                     current: ours_tmp,
                     current_path: ours_path,
                     ancestor: base_tmp,
@@ -241,7 +221,7 @@ pub(super) mod inner {
 
             /// Return the configured driver program for use with [`Self::prepare_external_driver()`], or `Err`
             /// with the built-in driver to use instead.
-            pub fn configured_driver(&self) -> Result<&'parent Driver, BuiltinDriver> {
+            pub fn configured_driver(&self) -> std::result::Result<&'parent Driver, BuiltinDriver> {
                 match self.driver {
                     DriverChoice::BuiltIn(builtin) => Err(builtin),
                     DriverChoice::Index(idx) => self.parent.drivers.get(idx).ok_or(BuiltinDriver::default()),
@@ -281,9 +261,8 @@ pub(super) mod inner {
     ///
     pub mod builtin_merge {
         use crate::blob::{
-            builtin_driver,
+            BuiltinDriver, PlatformRef, Resolution, builtin_driver,
             platform::{resource, resource::Data},
-            BuiltinDriver, PlatformRef, Resolution,
         };
 
         /// An identifier to tell us how a merge conflict was resolved by [builtin_merge](PlatformRef::builtin_merge).
@@ -344,11 +323,15 @@ pub(super) mod inner {
                         (Pick::Buffer, resolution)
                     }
                     BuiltinDriver::Binary => {
-                        // easier to reason about the 'split' compared to merging both conditions
-                        #[allow(clippy::if_same_then_else)]
-                        if !(self.current.id.is_null() || self.other.id.is_null()) && self.current.id == self.other.id {
-                            (Pick::Ours, Resolution::Complete)
-                        } else if (self.current.id.is_null() || self.other.id.is_null()) && ours == theirs {
+                        // Object IDs are authoritative when both resources have one. A null ID means the resource isn't
+                        // backed by an object, so compare its prepared data.
+                        let ours_matches_theirs = if self.current.id.is_null() || self.other.id.is_null() {
+                            ours == theirs
+                        } else {
+                            self.current.id == self.other.id
+                        };
+
+                        if ours_matches_theirs {
                             (Pick::Ours, Resolution::Complete)
                         } else {
                             let (pick, resolution) = builtin_driver::binary(self.options.resolve_binary_with);
@@ -403,6 +386,10 @@ impl<'parent> PlatformRef<'parent> {
     /// Note that at this stage, none-existing input data will simply default to an empty buffer when running the actual merge algorithm.
     /// Too-large resources will result in an error.
     ///
+    /// External merge driver launch errors provide `program` (Path), the invoked program name or path,
+    /// and preserve the underlying IO error as a cause. Unsuccessful exits additionally provide `exit_status`
+    /// (String), its display representation, and `exit_code` (I64) when available. Output streams are not captured.
+    ///
     /// Generally, it is assumed that standard logic, like deletions of files, is handled before any of this is called, so we are lenient
     /// in terms of buffer handling to make it more useful in the face of missing local files.
     pub fn merge(
@@ -410,22 +397,27 @@ impl<'parent> PlatformRef<'parent> {
         out: &mut Vec<u8>,
         labels: builtin_driver::text::Labels<'_>,
         context: &gix_command::Context,
-    ) -> Result<(inner::builtin_merge::Pick, Resolution), Error> {
+    ) -> Result<(inner::builtin_merge::Pick, Resolution)> {
+        use gix_error::{ResultExt, message};
+
         match self.configured_driver() {
             Ok(driver) => {
-                let mut cmd = self.prepare_external_driver(driver.command.clone(), labels, context.clone())?;
-                let status = cmd.status().map_err(|err| Error::SpawnExternalDriver {
-                    cmd: format!("{:?}", cmd.cmd),
-                    source: err,
+                let mut cmd = self
+                    .prepare_external_driver(driver.command.clone(), labels, context.clone())
+                    .or_raise(|| message("Failed to prepare external merge driver"))?;
+                let status = cmd.status().or_raise(|| {
+                    message!("Failed to launch external merge driver: {:?}", cmd.cmd).with_program(cmd.get_program())
                 })?;
                 if !status.success() {
-                    return Err(Error::ExternalDriverFailure {
-                        cmd: format!("{:?}", cmd.cmd),
-                        status,
-                    });
+                    let failure =
+                        message!("External merge driver failed: {:?}", cmd.cmd).with_command_status(&cmd, status);
+                    bail!(failure);
                 }
                 out.clear();
-                cmd.open_result_file()?.read_to_end(out)?;
+                cmd.open_result_file()
+                    .or_raise(|| message("IO failed when dealing with merge-driver output"))?
+                    .read_to_end(out)
+                    .or_raise(|| message("IO failed when dealing with merge-driver output"))?;
                 Ok((inner::builtin_merge::Pick::Buffer, Resolution::Complete))
             }
             Err(builtin) => {
@@ -440,8 +432,12 @@ impl<'parent> PlatformRef<'parent> {
     /// Using a `pick` obtained from [`merge()`](Self::merge), obtain the respective buffer suitable for reading or copying.
     /// Return `Ok(None)`  if the `pick` corresponds to a buffer (that was written separately).
     /// Return `Err(())` if the buffer is *too large*, so it was never read.
-    #[allow(clippy::result_unit_err)]
-    pub fn buffer_by_pick(&self, pick: inner::builtin_merge::Pick) -> Result<Option<&'parent [u8]>, ()> {
+    #[expect(
+        clippy::result_unit_err,
+        // TODO: make this nicer once we have nicer errors. OOM should be a standard error anyway.
+        reason = "Err(()) is needed to encode 'too large', without need for anything specific"
+    )]
+    pub fn buffer_by_pick(&self, pick: inner::builtin_merge::Pick) -> std::result::Result<Option<&'parent [u8]>, ()> {
         match pick {
             inner::builtin_merge::Pick::Ancestor => self.ancestor.data.as_slice().map(Some).ok_or(()),
             inner::builtin_merge::Pick::Ours => self.current.data.as_slice().map(Some).ok_or(()),
@@ -463,8 +459,8 @@ impl<'parent> PlatformRef<'parent> {
         &self,
         pick: inner::builtin_merge::Pick,
         buf: &[u8],
-        mut write_blob: impl FnMut(&[u8]) -> Result<gix_hash::ObjectId, E>,
-    ) -> Result<Option<gix_hash::ObjectId>, E> {
+        mut write_blob: impl FnMut(&[u8]) -> std::result::Result<gix_hash::ObjectId, E>,
+    ) -> std::result::Result<Option<gix_hash::ObjectId>, E> {
         let field = match pick {
             inner::builtin_merge::Pick::Ancestor => &self.ancestor,
             inner::builtin_merge::Pick::Ours => &self.current,

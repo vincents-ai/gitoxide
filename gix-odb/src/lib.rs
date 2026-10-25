@@ -8,6 +8,18 @@
 //! * access to packed objects
 //! * multiple loose objects and pack locations as gathered from `alternates` files.
 //!
+//! Errors preserve their original sources and classifications through [`gix_error::Exn`] and [`gix_error::Error`].
+//! [`gix_error::Message`] contexts carry diagnostic details such as native paths, object IDs as hex text,
+//! and unsigned sizes or limits. Functions creating these contexts document their keys and value types.
+//! Use [`gix_error::Error::metadata()`] to inspect each dictionary,
+//! skipping empty ones. Synthetic failures combine their message, class, and values
+//! in one diagnostic; real callee errors remain separate causes.
+//! Alternate cycles retain their directory chain in [`alternate::Cycle`] and expose a classification-only
+//! [`gix_error::ClassificationMarker`] source. Use [`gix_error::classify()`] or `is_corrupted()` on [`gix_error::Exn`]
+//! and [`gix_error::Error`] without depending on the concrete diagnostic type.
+//! Retryable verification diagnostics use [`gix_error::retryable()`]. Interrupted verification retains its original
+//! I/O error and uses [`gix_error::ClassificationMarker`] with [`gix_error::Class::Cancelled`].
+//!
 //! ## Write And Read Loose Objects
 //!
 //! ```
@@ -47,17 +59,18 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms, unsafe_code)]
+#![deny(missing_docs, unsafe_code)]
 
 use std::{
     cell::RefCell,
     path::PathBuf,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{Arc, atomic::AtomicUsize},
 };
 
 use arc_swap::ArcSwap;
-use gix_features::{threading::OwnShared, zlib::stream::deflate};
 pub use gix_pack as pack;
+use gix_parallel::OwnShared;
+use gix_zlib::stream::deflate;
 
 mod store_impls;
 pub use store_impls::{dynamic as store, loose};
@@ -115,7 +128,7 @@ pub use traits::{Header, HeaderExt};
 
 /// A thread-local handle to access any object.
 pub type Handle = Cache<store::Handle<OwnShared<Store>>>;
-/// A thread-local handle to access any object, but thread-safe and independent of the actual type of `OwnShared` or feature toggles in `gix-features`.
+/// A thread-local handle to access any object, but thread-safe and independent of the actual type of `OwnShared` or feature toggles in `gix-parallel`.
 pub type HandleArc = Cache<store::Handle<Arc<Store>>>;
 
 use store::types;
@@ -170,19 +183,24 @@ pub struct Store {
     object_hash: gix_hash::Kind,
     /// The maximum size of a single allocation caused by user-controlled on-disk pack data.
     alloc_limit_bytes: Option<usize>,
+    /// The compression level to use when writing loose objects.
+    loose_compression: gix_zlib::Compression,
 }
 
 /// Create a new cached handle to the object store with support for additional options.
 ///
+/// `object_hash` is the hash of contained objects and the hash used when writing objects.
 /// `replacements` is an iterator over pairs of old and new object ids for replacement support.
 /// This means that when asking for object `X`, one will receive object `X-replaced` given an iterator like `Some((X, X-replaced))`.
 pub fn at_opts(
     objects_dir: impl Into<PathBuf>,
+    object_hash: gix_hash::Kind,
     replacements: impl IntoIterator<Item = (gix_hash::ObjectId, gix_hash::ObjectId)>,
     options: store::init::Options,
 ) -> std::io::Result<Handle> {
     let handle = OwnShared::new(Store::at_opts(
         objects_dir.into(),
+        object_hash,
         &mut replacements.into_iter(),
         options,
     )?)
@@ -190,7 +208,8 @@ pub fn at_opts(
     Ok(Cache::from(handle))
 }
 
-/// Create a new cached handle to the object store.
-pub fn at(objects_dir: impl Into<PathBuf>) -> std::io::Result<Handle> {
-    at_opts(objects_dir, Vec::new(), Default::default())
+/// Create a new cached handle to the object store with `.git/objects` provided in `objects_dir`,
+/// with `object_hash` as the hash of contained objects to write.
+pub fn at(objects_dir: impl Into<PathBuf>, object_hash: gix_hash::Kind) -> std::io::Result<Handle> {
+    at_opts(objects_dir, object_hash, None, store::init::Options::default())
 }

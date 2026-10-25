@@ -1,4 +1,5 @@
-use std::{borrow::Cow, error::Error};
+use gix_error::Result;
+use std::borrow::Cow;
 
 use async_trait::async_trait;
 use bstr::{BStr, BString, ByteVec};
@@ -6,6 +7,7 @@ use futures_io::{AsyncRead, AsyncWrite};
 use futures_lite::AsyncWriteExt;
 
 use crate::{
+    Protocol, Service,
     client::{
         self,
         async_io::{RequestWriter, SetServiceResponse},
@@ -13,10 +15,9 @@ use crate::{
         git::{self, ConnectionState},
     },
     packetline::{
-        async_io::{StreamingPeekableIter, Writer},
         PacketLineRef,
+        async_io::{StreamingPeekableIter, Writer},
     },
-    Protocol, Service,
 };
 
 /// A TCP connection to either a `git` daemon or a spawned `git` process.
@@ -65,7 +66,7 @@ where
         true
     }
 
-    fn configure(&mut self, _config: &dyn std::any::Any) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    fn configure(&mut self, _config: &dyn std::any::Any) -> Result {
         Ok(())
     }
 }
@@ -80,7 +81,7 @@ where
         &mut self,
         service: Service,
         extra_parameters: &'a [(&'a str, Option<&'a str>)],
-    ) -> Result<SetServiceResponse<'_>, client::Error> {
+    ) -> std::result::Result<SetServiceResponse<'_>, client::Error> {
         if self.state.mode == git::ConnectMode::Daemon {
             let mut line_writer = Writer::new(&mut self.writer);
             line_writer.enable_binary_mode();
@@ -91,7 +92,7 @@ where
                     &self.state.path,
                     self.state.virtual_host.as_ref(),
                     extra_parameters,
-                ))
+                )?)
                 .await?;
             line_writer.flush().await?;
         }
@@ -113,7 +114,7 @@ where
         write_mode: client::WriteMode,
         on_into_read: client::MessageKind,
         trace: bool,
-    ) -> Result<RequestWriter<'_>, client::Error> {
+    ) -> std::result::Result<RequestWriter<'_>, client::Error> {
         Ok(RequestWriter::new_from_bufread(
             &mut self.writer,
             Box::new(self.line_provider.as_read_without_sidebands()),
@@ -164,8 +165,8 @@ mod async_net {
     use async_std::net::TcpStream;
 
     use crate::client::{
-        git::{async_io::Connection, ConnectMode},
         Error,
+        git::{ConnectMode, async_io::Connection},
     };
 
     impl Connection<TcpStream, TcpStream> {

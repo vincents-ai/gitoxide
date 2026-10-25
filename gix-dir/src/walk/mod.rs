@@ -1,8 +1,8 @@
-use std::{collections::BTreeSet, path::PathBuf, sync::atomic::AtomicBool};
+use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 
 use bstr::{BStr, BString};
 
-use crate::{entry, EntryRef};
+use crate::{EntryRef, entry};
 
 /// A type returned by the [`Delegate::emit()`] as passed to [`walk()`](function::walk()).
 ///
@@ -12,7 +12,7 @@ pub type Action = std::ops::ControlFlow<()>;
 
 /// Ready-made delegate implementations.
 pub mod delegate {
-    use crate::{entry, walk, walk::Action, Entry, EntryRef};
+    use crate::{Entry, EntryRef, entry, walk, walk::Action};
 
     type Entries = Vec<(Entry, Option<entry::Status>)>;
 
@@ -101,6 +101,8 @@ pub enum EmissionMode {
     ///
     /// Note that doing so is more expensive as it requires us to keep track of all entries in the directory structure
     /// until it's clear what to finally emit.
+    ///
+    /// Also note that empty *untracked* directories aren't empitted, also if these are nested (and empty)
     CollapseDirectory,
 }
 
@@ -269,38 +271,6 @@ pub struct Outcome {
     pub returned_entries: usize,
     /// The amount of entries, prior to pathspecs filtering them out or otherwise excluding them.
     pub seen_entries: u32,
-}
-
-/// The error returned by [`walk()`](function::walk()).
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error("Interrupted")]
-    Interrupted,
-    #[error("Worktree root at '{}' is not a directory", root.display())]
-    WorktreeRootIsFile { root: PathBuf },
-    #[error("Traversal root '{}' contains relative path components and could not be normalized", root.display())]
-    NormalizeRoot { root: PathBuf },
-    #[error("A symlink was found at component {component_index} of traversal root '{}' as seen from worktree root '{}'", root.display(), worktree_root.display())]
-    SymlinkInRoot {
-        root: PathBuf,
-        worktree_root: PathBuf,
-        /// This index starts at 0, with 0 being the first component.
-        component_index: usize,
-    },
-    #[error("Failed to update the excludes stack to see if a path is excluded")]
-    ExcludesAccess(std::io::Error),
-    #[error("Failed to read the directory at '{}'", path.display())]
-    ReadDir { path: PathBuf, source: std::io::Error },
-    #[error("Could not obtain directory entry in root of '{}'", parent_directory.display())]
-    DirEntry {
-        parent_directory: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("Could not obtain filetype of directory entry '{}'", path.display())]
-    DirEntryFileType { path: PathBuf, source: std::io::Error },
-    #[error("Could not obtain symlink metadata on '{}'", path.display())]
-    SymlinkMetadata { path: PathBuf, source: std::io::Error },
 }
 
 mod classify;

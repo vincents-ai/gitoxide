@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bstr::{BStr, ByteSlice};
 use gix_hash::ObjectId;
 use gix_merge::blob::builtin_driver::text::ConflictStyle;
-use gix_object::{tree::EntryMode, FindExt};
+use gix_object::{FindExt, tree::EntryMode};
 
 /// An entry in the conflict
 #[derive(Debug, Eq, PartialEq)]
@@ -48,7 +48,7 @@ pub enum ConflictKind {
 
 /// More loosely structured information about the `Conflict`.
 #[derive(Debug)]
-#[allow(dead_code)] // used only for debugging
+#[expect(dead_code, reason = "used only for debugging")]
 pub struct ConflictInfo {
     /// All the paths involved in the informational message
     pub paths: Vec<String>,
@@ -168,8 +168,9 @@ impl Iterator for Expectations<'_> {
             "diff3" => ConflictStyle::Diff3,
             unknown => unreachable!("Unknown conflict style: '{unknown}'"),
         };
-        let odb = gix_odb::at(subdir_path.join(".git/objects")).expect("object dir exists");
-        let objects = gix_odb::memory::Proxy::new(odb, gix_hash::Kind::Sha1);
+        let object_hash = gix_testtools::object_hash();
+        let odb = gix_odb::at(subdir_path.join(".git/objects"), object_hash).expect("object dir exists");
+        let objects = gix_odb::memory::Proxy::new(odb, object_hash);
         let our_commit_id = gix_hash::ObjectId::from_hex(our_commit_id.as_bytes()).unwrap();
         let their_commit_id = gix_hash::ObjectId::from_hex(their_commit_id.as_bytes()).unwrap();
         let merge_info = parse_merge_info(std::fs::read_to_string(subdir_path.join(merge_info_filename)).unwrap());

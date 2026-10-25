@@ -1,16 +1,22 @@
 use std::{
     io,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
 };
 
-use crate::{net, pack::receive::protocol::fetch::negotiate, OutputFormat};
+use crate::{OutputFormat, net, pack::receive::protocol::fetch::negotiate};
 #[cfg(feature = "async-client")]
 use gix::protocol::transport::client::async_io::connect;
 #[cfg(feature = "blocking-client")]
 use gix::protocol::transport::client::blocking_io::connect;
-use gix::{config::tree::Key, protocol::maybe_async, remote::fetch::Error, DynNestedProgress};
+use gix::{
+    DynNestedProgress, Result,
+    config::tree::Key,
+    error::{ResultExt, bail, message},
+    protocol::bisync,
+};
 pub use gix::{
+    NestedProgress, Progress,
     hash::ObjectId,
     objs::bstr::{BString, ByteSlice},
     odb::pack,
@@ -21,7 +27,6 @@ pub use gix::{
         transport,
         transport::client::Capabilities,
     },
-    NestedProgress, Progress,
 };
 
 pub const PROGRESS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
@@ -33,7 +38,7 @@ pub struct Context<W> {
     pub object_hash: gix::hash::Kind,
 }
 
-#[maybe_async::maybe_async]
+#[bisync::bisync]
 pub async fn receive<P, W>(
     protocol: Option<net::Protocol>,
     url: &str,
@@ -42,7 +47,7 @@ pub async fn receive<P, W>(
     mut wanted_refs: Vec<BString>,
     mut progress: P,
     ctx: Context<W>,
-) -> anyhow::Result<()>
+) -> Result<()>
 where
     W: std::io::Write,
     P: NestedProgress + 'static,
@@ -80,8 +85,8 @@ where
         .map(|ref_name| {
             gix::refspec::parse(ref_name.as_bstr(), gix::refspec::parse::Operation::Fetch).map(|r| r.to_owned())
         })
-        .collect::<Result<_, _>>()?;
-    let user_agent = ("agent", Some(agent.clone().into()));
+        .collect::<std::result::Result<_, _>>()?;
+    let user_agent = ("agent", Some(agent.clone()));
 
     let context = gix::protocol::fetch::refmap::init::Context {
         fetch_refspecs: fetch_refspecs.clone(),
@@ -99,11 +104,16 @@ where
     let refmap = fetch_refmap.fetch_blocking(&mut progress, &mut transport.inner, trace_packetlines)?;
 
     if refmap.is_missing_required_mapping() {
-        return Err(Error::NoMapping {
-            refspecs: refmap.refspecs.clone(),
-            num_remote_refs: refmap.remote_refs.len(),
-        }
-        .into());
+        bail!(gix::error::not_found(format!(
+            "None of the refspec(s) {} matched any of the {} refs on the remote",
+            refmap
+                .refspecs
+                .iter()
+                .map(|spec| spec.to_ref().instruction().to_bstring().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            refmap.remote_refs.len()
+        )));
     }
 
     let mut negotiate = Negotiate { refmap: &refmap };
@@ -122,6 +132,7 @@ where
                 ctx.object_hash,
                 ctx.format,
             )
+            .or_raise(|| message("Failed to receive the pack"))
             .map(|_| true)
         },
         progress,
@@ -148,7 +159,7 @@ struct Negotiate<'a> {
 }
 
 impl gix::protocol::fetch::Negotiate for Negotiate<'_> {
-    fn mark_complete_and_common_ref(&mut self) -> Result<negotiate::Action, negotiate::Error> {
+    fn mark_complete_and_common_ref(&mut self) -> gix::Result<negotiate::Action> {
         Ok(negotiate::Action::MustNegotiate {
             remote_ref_target_known: vec![], /* we don't really negotiate */
         })
@@ -168,7 +179,7 @@ impl gix::protocol::fetch::Negotiate for Negotiate<'_> {
         _state: &mut negotiate::one_round::State,
         _arguments: &mut Arguments,
         _previous_response: Option<&Response>,
-    ) -> Result<(negotiate::Round, bool), negotiate::Error> {
+    ) -> gix::Result<(negotiate::Round, bool)> {
         Ok((
             negotiate::Round {
                 haves_sent: 0,
@@ -242,8 +253,10 @@ fn print(out: &mut impl io::Write, res: pack::bundle::write::Outcome, refs: &[Re
 
 fn write_raw_refs(refs: &[Ref], directory: PathBuf) -> std::io::Result<()> {
     let assure_dir_exists = |path: &BString| {
-        assert!(!path.starts_with_str("/"), "no ref start with a /, they are relative");
-        let path = directory.join(gix::path::from_byte_slice(path));
+        gix::validate::reference::name(path.as_bstr())
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+        let path = directory
+            .join(gix::path::from_byte_slice(path).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?);
         std::fs::create_dir_all(path.parent().expect("multi-component path")).map(|_| path)
     };
     for r in refs {
@@ -271,7 +284,7 @@ fn write_raw_refs(refs: &[Ref], directory: PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn receive_pack_blocking(
     mut directory: Option<PathBuf>,
     mut refs_directory: Option<PathBuf>,
@@ -288,7 +301,8 @@ fn receive_pack_blocking(
         thread_limit,
         index_version: pack::index::Version::V2,
         iteration_mode: pack::data::input::Mode::Verify,
-        object_hash,
+        alloc_limit_bytes: None,
+        compression: gix::zlib::Compression::BEST_SPEED,
     };
     let outcome = pack::Bundle::write_to_directory(
         &mut input,
@@ -296,6 +310,7 @@ fn receive_pack_blocking(
         progress,
         should_interrupt,
         None::<gix::objs::find::Never>,
+        object_hash,
         options,
     )
     .map_err(io::Error::other)?;

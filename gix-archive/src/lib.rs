@@ -13,13 +13,10 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(rust_2018_idioms, missing_docs)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 use bstr::BString;
-
-/// The error returned by [`write_stream()`].
-pub type Error = gix_error::Exn<gix_error::Message>;
 
 /// The supported container formats for use in [`write_stream()`].
 #[derive(Default, PartialEq, Eq, Copy, Clone, Debug)]

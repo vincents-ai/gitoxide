@@ -6,7 +6,7 @@ use gix_filter::{eol, pipeline::CrlfRoundTripCheck};
 use crate::{driver::apply::driver_with_process, pipeline::pipeline};
 
 #[test]
-fn no_driver_but_filter_with_autocrlf() -> gix_testtools::Result {
+fn no_driver_but_filter_with_autocrlf() -> gix_testtools::TestResult {
     let (_cache, mut pipe) = pipeline("no-filter", || {
         (
             vec![],
@@ -38,7 +38,7 @@ fn no_driver_but_filter_with_autocrlf() -> gix_testtools::Result {
 }
 
 #[test]
-fn all_stages_mean_streaming_is_impossible() -> gix_testtools::Result {
+fn all_stages_mean_streaming_is_impossible() -> gix_testtools::TestResult {
     let (mut cache, mut pipe) = pipeline("all-filters", || {
         (
             vec![driver_with_process()],
@@ -48,7 +48,7 @@ fn all_stages_mean_streaming_is_impossible() -> gix_testtools::Result {
         )
     })?;
 
-    let source_hash = match gix_testtools::hash_kind_from_env().unwrap_or_default() {
+    let source_hash = match gix_testtools::object_hash() {
         gix_hash::Kind::Sha1 => "2188d1cdee2b93a80084b61af431a49d21bc7cc0",
         gix_hash::Kind::Sha256 => "66b8b3bf4f18bcb5f74e09b24ac62e10934e9453a1de9793edb9390dc2ab1d6b",
         _ => unimplemented!(),
@@ -73,7 +73,7 @@ fn all_stages_mean_streaming_is_impossible() -> gix_testtools::Result {
 }
 
 #[test]
-fn only_driver_means_streaming_is_possible() -> gix_testtools::Result {
+fn only_driver_means_streaming_is_possible() -> gix_testtools::TestResult {
     let (mut cache, mut pipe) = pipeline("driver-only", || {
         (
             vec![driver_with_process()],
@@ -83,7 +83,7 @@ fn only_driver_means_streaming_is_possible() -> gix_testtools::Result {
         )
     })?;
 
-    let source_hash = match gix_testtools::hash_kind_from_env().unwrap_or_default() {
+    let source_hash = match gix_testtools::object_hash() {
         gix_hash::Kind::Sha1 => "2188d1cdee2b93a80084b61af431a49d21bc7cc0",
         gix_hash::Kind::Sha256 => "66b8b3bf4f18bcb5f74e09b24ac62e10934e9453a1de9793edb9390dc2ab1d6b",
         _ => unimplemented!(),
@@ -113,12 +113,12 @@ fn only_driver_means_streaming_is_possible() -> gix_testtools::Result {
 }
 
 #[test]
-fn no_filter_means_reader_is_returned_unchanged() -> gix_testtools::Result {
+fn no_filter_means_reader_is_returned_unchanged() -> gix_testtools::TestResult {
     let (mut cache, mut pipe) = pipeline("no-filters", || {
         (vec![], Vec::new(), CrlfRoundTripCheck::Fail, Default::default())
     })?;
 
-    let source_hash = match gix_testtools::hash_kind_from_env().unwrap_or_default() {
+    let source_hash = match gix_testtools::object_hash() {
         gix_hash::Kind::Sha1 => "2188d1cdee2b93a80084b61af431a49d21bc7cc0",
         gix_hash::Kind::Sha256 => "66b8b3bf4f18bcb5f74e09b24ac62e10934e9453a1de9793edb9390dc2ab1d6b",
         _ => unimplemented!(),
@@ -145,12 +145,10 @@ fn no_filter_means_reader_is_returned_unchanged() -> gix_testtools::Result {
     Ok(())
 }
 
-#[allow(clippy::ptr_arg)]
-fn no_call(_buf: &mut Vec<u8>) -> Result<Option<()>, Box<dyn std::error::Error + Send + Sync>> {
+fn no_call(_buf: &mut Vec<u8>) -> gix_error::Result<Option<()>> {
     unreachable!("index function will not be called")
 }
 
-#[allow(clippy::ptr_arg)]
-fn no_object_in_index(_buf: &mut Vec<u8>) -> Result<Option<()>, Box<dyn std::error::Error + Send + Sync>> {
+fn no_object_in_index(_buf: &mut Vec<u8>) -> gix_error::Result<Option<()>> {
     Ok(None)
 }

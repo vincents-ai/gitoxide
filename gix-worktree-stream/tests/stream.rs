@@ -1,9 +1,56 @@
 /// Convert a hexadecimal hash into its corresponding `ObjectId` or _panic_.
-fn hex_to_id(hex: &str) -> gix_hash::ObjectId {
-    gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("40 bytes hex")
+fn hex_to_id(hex_sha1: &str, hex_sha256: &str) -> gix_hash::ObjectId {
+    match gix_testtools::object_hash() {
+        gix_hash::Kind::Sha1 => gix_hash::ObjectId::from_hex(hex_sha1.as_bytes()).expect("40 bytes hex"),
+        gix_hash::Kind::Sha256 => gix_hash::ObjectId::from_hex(hex_sha256.as_bytes()).expect("64 bytes hex"),
+        _ => unimplemented!(),
+    }
+}
+
+#[test]
+fn impossible_path_allocation_preserves_its_source() {
+    let mut input = Vec::new();
+    input.extend_from_slice(&usize::MAX.to_le_bytes());
+    input.extend_from_slice(&0usize.to_le_bytes());
+    input.extend_from_slice(&[0, 0]);
+    input.extend_from_slice(&[0; 20]);
+
+    let err = gix_worktree_stream::Stream::from_read(std::io::Cursor::new(input))
+        .next_entry()
+        .expect_err("the declared path length cannot be allocated");
+    insta::assert_debug_snapshot!(err, "the allocation failure remains classified", @"
+    Could not read stream entry
+
+    Caused by:
+        0: I/O error (OutOfMemory)
+        1: memory allocation failed because the computed capacity exceeded the collection's maximum
+    ");
+    let io_err = err
+        .downcast_any_ref::<std::io::Error>()
+        .expect("the I/O error is retained");
+    insta::assert_debug_snapshot!(io_err, "impossible path allocation preserves its source", @"
+    Custom {
+        kind: OutOfMemory,
+        error: TryReserveError {
+            kind: CapacityOverflow,
+        },
+    }
+    ");
+    assert_eq!(io_err.kind(), std::io::ErrorKind::OutOfMemory);
+    assert!(
+        io_err
+            .get_ref()
+            .expect("the allocation error is retained")
+            .is::<std::collections::TryReserveError>(),
+        "the allocation error is retained"
+    );
+    assert!(err.is_resource_exhausted(), "the allocation failure remains classified");
+    assert!(!err.is_corrupted());
+    assert!(!err.can_retry());
 }
 
 mod from_tree {
+    use gix_error::Result;
     use std::{
         convert::Infallible,
         io::{Error, Read, Write},
@@ -12,8 +59,9 @@ mod from_tree {
     };
 
     use gix_attributes::glob::pattern::Case;
+    use gix_error::ErrorExt;
     use gix_hash::oid;
-    use gix_object::{bstr::ByteSlice, tree::EntryKind, Data};
+    use gix_object::{Data, bstr::ByteSlice, tree::EntryKind};
     use gix_worktree::stack::state::attributes::Source;
     use std::sync::LazyLock;
 
@@ -23,48 +71,71 @@ mod from_tree {
     struct FailObjectRetrieval;
 
     impl gix_object::Find for FailObjectRetrieval {
-        fn try_find<'a>(
-            &self,
-            _id: &oid,
-            _buffer: &'a mut Vec<u8>,
-        ) -> Result<Option<Data<'a>>, gix_object::find::Error> {
-            Err(Box::new(Error::other("object retrieval failed")))
+        fn try_find<'a>(&self, _id: &oid, _buffer: &'a mut Vec<u8>) -> Result<Option<Data<'a>>> {
+            Err(Error::other("object retrieval failed").raise())
         }
     }
 
     #[test]
     fn can_receive_err_if_root_is_not_found() {
         let mut stream = gix_worktree_stream::from_tree(
-            gix_hash::Kind::Sha1.null(),
+            gix_testtools::object_hash().null(),
             FailObjectRetrieval,
             mutating_pipeline(false),
-            |_, _, _| -> Result<_, Infallible> { unreachable!("must not be called") },
+            |_, _, _| -> std::result::Result<_, Infallible> { unreachable!("must not be called") },
         );
         let err = stream.next_entry().unwrap_err();
-        assert_eq!(err.to_string(), "Could not find a tree to traverse");
+        insta::assert_debug_snapshot!(err, "can receive err if root is not found", @"
+        Could not find a tree to traverse
+
+        Caused by:
+            0: I/O error (Other)
+            1: object retrieval failed
+        ");
     }
 
     #[test]
-    fn can_receive_err_if_attribute_not_found() -> gix_testtools::Result {
+    fn can_receive_err_if_attribute_not_found() -> gix_testtools::TestResult {
         let (_dir, head_tree, odb, _cache) = basic()?;
         let mut stream = gix_worktree_stream::from_tree(head_tree, odb, mutating_pipeline(false), |_, _, _| {
             Err(Error::other("attribute retrieval failed"))
         });
         let err = stream.next_entry().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Could not query attributes for path \".gitattributes\""
-        );
+        insta::assert_debug_snapshot!(err, "can receive err if attribute not found", @r#"
+        Could not query attributes for path ".gitattributes"
+
+        Caused by:
+            0: I/O error (Other)
+            1: attribute retrieval failed
+        "#);
         Ok(())
     }
 
-    #[cfg(target_pointer_width = "64")]
-    const EXPECTED_BUFFER_LENGTH: usize = 320302;
-    #[cfg(target_pointer_width = "32")]
-    const EXPECTED_BUFFER_LENGTH: usize = 320198;
+    #[test]
+    fn filter_process_failure_during_shutdown_is_ignored() -> gix_testtools::TestResult {
+        let (_dir, head_tree, odb, mut cache) = basic()?;
+        let mut pipeline = mutating_pipeline(true);
+        *pipeline
+            .options_mut()
+            .drivers
+            .first_mut()
+            .expect("the filter driver was configured") = driver_with_process("fail-on-shutdown");
+        let mut stream =
+            gix_worktree_stream::from_tree(head_tree, odb.clone(), pipeline, move |rela_path, mode, attrs| {
+                cache
+                    .at_entry(rela_path, Some(mode.into()), &odb)
+                    .map(|entry| entry.matching_attributes(attrs))
+                    .map(|_| ())
+            });
+
+        while let Some(mut entry) = stream.next_entry()? {
+            std::io::copy(&mut entry, &mut std::io::sink())?;
+        }
+        Ok(())
+    }
 
     #[test]
-    fn will_provide_all_information_and_respect_export_ignore() -> gix_testtools::Result {
+    fn will_provide_all_information_and_respect_export_ignore() -> gix_testtools::TestResult {
         let (dir, head_tree, odb, mut cache) = basic()?;
         let mut stream = gix_worktree_stream::from_tree(
             head_tree,
@@ -77,12 +148,13 @@ mod from_tree {
                     .map(|_| ())
             },
         );
+        let object_hash = gix_testtools::object_hash();
         stream
-            .add_entry_from_path(&dir, &dir.join("extra-file"))?
-            .add_entry_from_path(&dir, &dir.join("extra-bigfile"))?
-            .add_entry_from_path(&dir, &dir.join("extra-exe"))?
-            .add_entry_from_path(&dir, &dir.join("extra-dir-empty"))?
-            .add_entry_from_path(&dir, &dir.join("extra-dir").join("symlink-to-extra"))?;
+            .add_entry_from_path(&dir, &dir.join("extra-file"), object_hash)?
+            .add_entry_from_path(&dir, &dir.join("extra-bigfile"), object_hash)?
+            .add_entry_from_path(&dir, &dir.join("extra-exe"), object_hash)?
+            .add_entry_from_path(&dir, &dir.join("extra-dir-empty"), object_hash)?
+            .add_entry_from_path(&dir, &dir.join("extra-dir").join("symlink-to-extra"), object_hash)?;
 
         let tee_read = TeeToMemory {
             read: stream.into_read(),
@@ -92,10 +164,10 @@ mod from_tree {
         let mut paths_and_modes = Vec::new();
         let mut stream = gix_worktree_stream::Stream::from_read(tee_read);
 
-        while let Some(mut entry) = stream.next_entry().expect("entry retrieval does not fail") {
+        while let Some(mut entry) = stream.next_entry()? {
             paths_and_modes.push((entry.relative_path().to_owned(), entry.mode.kind(), entry.id));
             let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).expect("stream can always be read");
+            entry.read_to_end(&mut buf)?;
             if !buf.is_empty() && entry.mode.is_blob() {
                 if entry.relative_path().contains_str("extra") {
                     assert!(
@@ -121,53 +193,69 @@ mod from_tree {
                 (
                     ".gitattributes".into(),
                     EntryKind::Blob,
-                    hex_to_id("45c160c35c17ad264b96431cceb9793160396e99")
+                    hex_to_id(
+                        "45c160c35c17ad264b96431cceb9793160396e99",
+                        "e34ae8e2c517230c6c613202a955b5f2095567830de5c3bb7081d72f1af393dd"
+                    )
                 ),
                 (
                     "a".into(),
                     EntryKind::Blob,
-                    hex_to_id("45b983be36b73c0788dc9cbcb76cbb80fc7bb057")
+                    hex_to_id(
+                        "45b983be36b73c0788dc9cbcb76cbb80fc7bb057",
+                        "96c18f0297e38d01f4b2dacddea4259aea6b2961eb0822bd2c0c3f6029030045"
+                    )
                 ),
                 (
                     "bigfile".into(),
                     EntryKind::Blob,
-                    hex_to_id("4995fde49ed64e043977e22539f66a0d372dd129")
+                    hex_to_id(
+                        "4995fde49ed64e043977e22539f66a0d372dd129",
+                        "527a170c0c29520af58bf61a383c4e99a7a7c63c0475cbb630cf98d38d6c0dce"
+                    )
                 ),
                 (
                     "symlink-to-a".into(),
                     EntryKind::Link,
-                    hex_to_id("2e65efe2a145dda7ee51d1741299f848e5bf752e")
+                    hex_to_id(
+                        "2e65efe2a145dda7ee51d1741299f848e5bf752e",
+                        "eb337bcee2061c5313c9a1392116b6c76039e9e30d71467ae359b36277e17dc7"
+                    )
                 ),
                 (
                     "dir/.gitattributes".into(),
                     EntryKind::Blob,
-                    hex_to_id("81b9a375276405703e05be6cecf0fc1c8b8eed64")
+                    hex_to_id(
+                        "81b9a375276405703e05be6cecf0fc1c8b8eed64",
+                        "4b74474eca46ad7e1807afe8855e7a511d132b314d3d0f481bb55a331b249fb7"
+                    )
                 ),
                 (
                     "dir/b".into(),
                     EntryKind::Blob,
-                    hex_to_id("ab4a98190cf776b43cb0fe57cef231fb93fd07e6")
+                    hex_to_id(
+                        "ab4a98190cf776b43cb0fe57cef231fb93fd07e6",
+                        "cf84f9ae227fa5c481dacd97f6d6506de727dabd30377c6907f623ef1192637a"
+                    )
                 ),
                 (
                     "dir/subdir/exe".into(),
                     EntryKind::BlobExecutable,
-                    hex_to_id("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+                    hex_to_id(
+                        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+                        "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813"
+                    )
                 ),
                 (
                     "dir/subdir/streamed".into(),
                     EntryKind::Blob,
-                    hex_to_id("08991f58f4de5d85b61c0f87f3ac053c79d0e739")
+                    hex_to_id(
+                        "08991f58f4de5d85b61c0f87f3ac053c79d0e739",
+                        "8c13ad7df9686daf00357f34700922485802cb0be33e684ec5171f7d0d8a84fd"
+                    )
                 ),
-                (
-                    "extra-file".into(),
-                    EntryKind::Blob,
-                    hex_to_id("0000000000000000000000000000000000000000")
-                ),
-                (
-                    "extra-bigfile".into(),
-                    EntryKind::Blob,
-                    hex_to_id("0000000000000000000000000000000000000000")
-                ),
+                ("extra-file".into(), EntryKind::Blob, object_hash.null()),
+                ("extra-bigfile".into(), EntryKind::Blob, object_hash.null()),
                 (
                     "extra-exe".into(),
                     if cfg!(windows) {
@@ -175,23 +263,29 @@ mod from_tree {
                     } else {
                         EntryKind::BlobExecutable
                     },
-                    hex_to_id("0000000000000000000000000000000000000000")
+                    object_hash.null()
                 ),
-                (
-                    "extra-dir-empty".into(),
-                    EntryKind::Tree,
-                    hex_to_id("0000000000000000000000000000000000000000")
-                ),
-                (
-                    "extra-dir/symlink-to-extra".into(),
-                    EntryKind::Link,
-                    hex_to_id("0000000000000000000000000000000000000000")
-                )
+                ("extra-dir-empty".into(), EntryKind::Tree, object_hash.null()),
+                ("extra-dir/symlink-to-extra".into(), EntryKind::Link, object_hash.null())
             ]
         );
+
+        #[cfg(target_pointer_width = "64")]
+        let expected_buffer_length: usize = match gix_testtools::object_hash() {
+            gix_hash::Kind::Sha1 => 320302,
+            gix_hash::Kind::Sha256 => 320458,
+            _ => unimplemented!(),
+        };
+        #[cfg(target_pointer_width = "32")]
+        let expected_buffer_length: usize = match gix_testtools::object_hash() {
+            gix_hash::Kind::Sha1 => 320198,
+            gix_hash::Kind::Sha256 => todo!("let the test fail on CI and add the value here"),
+            _ => unimplemented!(),
+        };
+
         assert_eq!(
             copy.lock().len(),
-            EXPECTED_BUFFER_LENGTH,
+            expected_buffer_length,
             "keep track of file size changes of the streaming format"
         );
 
@@ -199,10 +293,10 @@ mod from_tree {
             gix_worktree_stream::Stream::from_read(std::io::Cursor::new(copy.lock().as_bytes().to_owned()));
         let mut copied_paths_and_modes = Vec::new();
         let mut buf = Vec::new();
-        while let Some(mut entry) = copied_stream.next_entry().expect("entry retrieval does not fail") {
+        while let Some(mut entry) = copied_stream.next_entry()? {
             copied_paths_and_modes.push((entry.relative_path().to_owned(), entry.mode.kind(), entry.id));
             buf.clear();
-            entry.read_to_end(&mut buf).expect("stream can always be read");
+            entry.read_to_end(&mut buf)?;
         }
         assert_eq!(
             copied_paths_and_modes, paths_and_modes,
@@ -212,7 +306,7 @@ mod from_tree {
     }
 
     #[test]
-    fn can_drop_entry_without_reading_it() -> gix_testtools::Result {
+    fn can_drop_entry_without_reading_it() -> gix_testtools::TestResult {
         let (_dir, head_tree, odb, mut cache) = basic()?;
         let mut stream = gix_worktree_stream::from_tree(
             head_tree,
@@ -226,7 +320,7 @@ mod from_tree {
             },
         );
 
-        drop(stream.next_entry().expect("entry retrieval does not fail"));
+        drop(stream.next_entry()?);
         Ok(())
     }
 
@@ -237,7 +331,7 @@ mod from_tree {
             let hex = std::fs::read(dir.join("head.hex"))?;
             gix_hash::ObjectId::from_hex(hex.trim())?
         };
-        let odb = gix_odb::at(dir.join(".git").join("objects"))?;
+        let odb = gix_odb::at(dir.join(".git").join("objects"), gix_testtools::object_hash())?;
 
         let mut collection = Default::default();
         let mut buf = Default::default();
@@ -255,8 +349,9 @@ mod from_tree {
     fn mutating_pipeline(driver: bool) -> gix_filter::Pipeline {
         gix_filter::Pipeline::new(
             Default::default(),
+            gix_testtools::object_hash(),
             gix_filter::pipeline::Options {
-                drivers: if driver { vec![driver_with_process()] } else { vec![] },
+                drivers: if driver { vec![driver_with_process("")] } else { vec![] },
                 eol_config: gix_filter::eol::Configuration {
                     auto_crlf: gix_filter::eol::AutoCrlf::Enabled,
                     ..Default::default()
@@ -266,7 +361,7 @@ mod from_tree {
         )
     }
 
-    pub(crate) fn driver_with_process() -> gix_filter::Driver {
+    pub(crate) fn driver_with_process(extra_args: &str) -> gix_filter::Driver {
         let mut exe = DRIVER.to_string_lossy().into_owned();
         if cfg!(windows) {
             exe = exe.replace('\\', "/");
@@ -275,29 +370,13 @@ mod from_tree {
             name: "arrow".into(),
             clean: None,
             smudge: None,
-            process: Some((exe + " process").into()),
+            process: Some((exe + " process " + extra_args).into()),
             required: true,
         }
     }
 
-    static DRIVER: LazyLock<PathBuf> = LazyLock::new(|| {
-        let mut cargo = std::process::Command::new(env!("CARGO"));
-        let res = cargo
-            .args(["build", "-p=gix-filter", "--example", "arrow"])
-            .status()
-            .expect("cargo should run fine");
-        assert!(res.success(), "cargo invocation should be successful");
-
-        let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .ancestors()
-            .nth(1)
-            .expect("first parent in target dir")
-            .join("debug")
-            .join("examples")
-            .join(if cfg!(windows) { "arrow.exe" } else { "arrow" });
-        assert!(path.is_file(), "Expecting driver to be located at {}", path.display());
-        path
-    });
+    static DRIVER: LazyLock<PathBuf> =
+        LazyLock::new(|| gix_testtools::build_example_for_test("gix-filter", "arrow", env!("CARGO_TARGET_TMPDIR")));
 
     struct TeeToMemory<R> {
         read: R,

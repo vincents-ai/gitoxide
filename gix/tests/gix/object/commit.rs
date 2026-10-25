@@ -1,14 +1,10 @@
+use gix_testtools::TestResult;
 use std::cmp::Ordering;
 
-/// Convert a hexadecimal hash into its corresponding `ObjectId` or _panic_.
-fn hex_to_id(hex: &str) -> gix_hash::ObjectId {
-    gix_hash::ObjectId::from_hex(hex.as_bytes()).expect("40 bytes hex")
-}
-
-use crate::basic_repo;
+use crate::{basic_repo, util::hex_to_id};
 
 #[test]
-fn short_id() -> crate::Result {
+fn short_id() -> TestResult {
     let repo = basic_repo()?;
     let commit = repo.head_commit()?;
     assert_eq!(commit.short_id()?.cmp_oid(&commit.id), Ordering::Equal);
@@ -16,7 +12,7 @@ fn short_id() -> crate::Result {
 }
 
 #[test]
-fn tree() -> crate::Result {
+fn tree() -> TestResult {
     let repo = basic_repo()?;
     let tree_id = repo.head_tree_id()?;
     assert_eq!(tree_id, hex_to_id("21d3ba9a26b790a4858d67754ae05d04dfce4d0c"));
@@ -35,7 +31,7 @@ fn tree() -> crate::Result {
 }
 
 #[test]
-fn decode() -> crate::Result {
+fn decode() -> TestResult {
     let repo = basic_repo()?;
     let commit = repo.head_commit()?;
     assert_eq!(commit.decode()?.message, commit.message_raw()?);

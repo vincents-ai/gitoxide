@@ -1,54 +1,20 @@
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
-mod error {
-    use crate::handshake::refs::parse;
-
-    /// The error returned by invoking a [`super::function::LsRefsCommand`].
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum Error {
-        #[error(transparent)]
-        Io(#[from] std::io::Error),
-        #[error(transparent)]
-        Transport(#[from] gix_transport::client::Error),
-        #[error(transparent)]
-        Parse(#[from] parse::Error),
-        #[error(transparent)]
-        ArgumentValidation(#[from] crate::command::validate_argument_prefixes::Error),
-    }
-
-    impl gix_transport::IsSpuriousError for Error {
-        fn is_spurious(&self) -> bool {
-            match self {
-                Error::Io(err) => err.is_spurious(),
-                Error::Transport(err) => err.is_spurious(),
-                _ => false,
-            }
-        }
-    }
-}
-#[cfg(any(feature = "blocking-client", feature = "async-client"))]
-pub use error::Error;
-
-#[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use self::function::RefPrefixes;
 
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub(crate) mod function {
-    use std::{borrow::Cow, collections::HashSet};
+    use std::collections::HashSet;
 
     use bstr::{BString, ByteVec};
-    use gix_features::progress::Progress;
+    use gix_error::{ResultExt, message};
     use gix_transport::client::Capabilities;
+    use gix_utils::progress::Progress;
 
-    use super::Error;
     #[cfg(feature = "async-client")]
-    use crate::transport::client::async_io::{self, TransportV2Ext as _};
+    use crate::transport::client::async_io::TransportV2Ext as _;
     #[cfg(feature = "blocking-client")]
-    use crate::transport::client::blocking_io::{self, TransportV2Ext as _};
-    use crate::{
-        handshake::{refs::from_v2_refs, Ref},
-        Command,
-    };
+    use crate::transport::client::blocking_io::TransportV2Ext as _;
+    use crate::{Command, handshake::Ref};
 
     /// [`RefPrefixes`] are the set of prefixes that are sent to the server for
     /// filtering purposes.
@@ -125,12 +91,54 @@ pub(crate) mod function {
 
     /// A command to list references from a remote Git repository.
     ///
-    /// It acts as a utility to separate the invocation into the shared blocking portion,
-    /// and the one that performs IO either blocking or `async`.
+    /// Its invocation uses the same implementation with either blocking or asynchronous I/O.
     pub struct LsRefsCommand<'a> {
         pub(crate) capabilities: &'a Capabilities,
-        features: Vec<(&'static str, Option<Cow<'static, str>>)>,
+        features: Vec<crate::command::Feature>,
         arguments: Vec<BString>,
+    }
+
+    macro_rules! invoke {
+        ($name:ident, $bisync:path, $transport:path, $from_v2_refs:path, $mode:literal) => {
+            /// Invoke a ls-refs V2 command on `transport`.
+            ///
+            /// `progress` is used to provide feedback.
+            /// If `trace` is `true`, all packetlines received or sent will be passed to the facilities of the `gix-trace` crate.
+            #[$bisync]
+            pub async fn $name(
+                self,
+                mut transport: impl $transport,
+                progress: &mut impl Progress,
+                trace: bool,
+            ) -> gix_error::Result<Vec<Ref>> {
+                let _span = gix_trace::detail!("gix_protocol::LsRefsCommand::invoke()", mode = $mode);
+                Command::LsRefs
+                    .validate_argument_prefixes(
+                        gix_transport::Protocol::V2,
+                        self.capabilities,
+                        &self.arguments,
+                        &self.features,
+                    )
+                    .or_raise(|| message("Invalid ls-refs arguments or capabilities"))?;
+
+                progress.step();
+                progress.set_name("list refs".into());
+                let mut remote_refs = transport
+                    .invoke(
+                        Command::LsRefs.as_str(),
+                        self.features.into_iter(),
+                        if self.arguments.is_empty() {
+                            None
+                        } else {
+                            Some(self.arguments.into_iter())
+                        },
+                        trace,
+                    )
+                    .await
+                    .or_raise(|| message("Could not invoke ls-refs"))?;
+                $from_v2_refs(&mut remote_refs).await
+            }
+        };
     }
 
     impl<'a> LsRefsCommand<'a> {
@@ -142,7 +150,7 @@ pub(crate) mod function {
         pub fn new(
             ref_prefixes: Option<RefPrefixes>,
             capabilities: &'a Capabilities,
-            agent: (&'static str, Option<Cow<'static, str>>),
+            agent: crate::command::Feature,
         ) -> Self {
             let ls_refs = Command::LsRefs;
             let mut features = ls_refs.default_features(gix_transport::Protocol::V2, capabilities);
@@ -167,82 +175,100 @@ pub(crate) mod function {
             }
         }
 
-        /// Invoke a ls-refs V2 command on `transport`.
-        ///
-        /// `progress` is used to provide feedback.
-        /// If `trace` is `true`, all packetlines received or sent will be passed to the facilities of the `gix-trace` crate.
         #[cfg(feature = "async-client")]
-        pub async fn invoke_async(
-            self,
-            mut transport: impl async_io::Transport,
-            progress: &mut impl Progress,
-            trace: bool,
-        ) -> Result<Vec<Ref>, Error> {
-            let _span = gix_features::trace::detail!("gix_protocol::LsRefsCommand::invoke_async()");
-            Command::LsRefs.validate_argument_prefixes(
-                gix_transport::Protocol::V2,
-                self.capabilities,
-                &self.arguments,
-                &self.features,
-            )?;
+        invoke!(
+            invoke_async,
+            ::gix_macros::keep,
+            crate::transport::client::async_io::Transport,
+            crate::handshake::refs::async_io::from_v2_refs,
+            "async"
+        );
 
-            progress.step();
-            progress.set_name("list refs".into());
-            let mut remote_refs = transport
-                .invoke(
-                    Command::LsRefs.as_str(),
-                    self.features.into_iter(),
-                    if self.arguments.is_empty() {
-                        None
-                    } else {
-                        Some(self.arguments.into_iter())
-                    },
-                    trace,
-                )
-                .await?;
-            Ok(from_v2_refs(&mut remote_refs).await?)
-        }
-
-        /// Invoke a ls-refs V2 command on `transport`.
-        ///
-        /// `progress` is used to provide feedback.
-        /// If `trace` is `true`, all packetlines received or sent will be passed to the facilities of the `gix-trace` crate.
         #[cfg(feature = "blocking-client")]
-        pub fn invoke_blocking(
-            self,
-            mut transport: impl blocking_io::Transport,
-            progress: &mut impl Progress,
-            trace: bool,
-        ) -> Result<Vec<Ref>, Error> {
-            let _span = gix_features::trace::detail!("gix_protocol::LsRefsCommand::invoke_blocking()");
-            Command::LsRefs.validate_argument_prefixes(
-                gix_transport::Protocol::V2,
-                self.capabilities,
-                &self.arguments,
-                &self.features,
-            )?;
-
-            progress.step();
-            progress.set_name("list refs".into());
-            let mut remote_refs = transport.invoke(
-                Command::LsRefs.as_str(),
-                self.features.into_iter(),
-                if self.arguments.is_empty() {
-                    None
-                } else {
-                    Some(self.arguments.into_iter())
-                },
-                trace,
-            )?;
-            Ok(from_v2_refs(&mut remote_refs)?)
-        }
+        invoke!(
+            invoke_blocking,
+            ::gix_macros::sync,
+            crate::transport::client::blocking_io::Transport,
+            crate::handshake::refs::blocking_io::from_v2_refs,
+            "blocking"
+        );
     }
 
     #[cfg(test)]
-    mod ref_prefixes {
+    mod tests {
         use bstr::{BString, ByteSlice};
 
         use super::RefPrefixes;
+
+        #[cfg(feature = "blocking-client")]
+        #[test]
+        fn invoke_preserves_transport_retryability() -> gix_testtools::TestResult {
+            let mut error_snapshots = Vec::new();
+            use std::io::{self, ErrorKind};
+
+            struct FailingWriter(ErrorKind);
+            impl io::Write for FailingWriter {
+                fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                    Err(self.0.into())
+                }
+                fn flush(&mut self) -> io::Result<()> {
+                    Ok(())
+                }
+            }
+
+            let capabilities = super::Capabilities::from_lines("version 2\nls-refs\nagent=test\n".into())?;
+            for (kind, retryable) in [
+                (ErrorKind::BrokenPipe, true),
+                (ErrorKind::ConnectionReset, true),
+                (ErrorKind::PermissionDenied, false),
+            ] {
+                let transport = gix_transport::client::git::blocking_io::Connection::new(
+                    &[][..],
+                    FailingWriter(kind),
+                    gix_transport::Protocol::V2,
+                    "repo.git",
+                    None::<(&str, _)>,
+                    gix_transport::client::git::ConnectMode::Process,
+                    false,
+                );
+                let err = super::LsRefsCommand::new(None, &capabilities, ("agent", Some("test".into())))
+                    .invoke_blocking(transport, &mut gix_utils::progress::Discard, false)
+                    .expect_err("the transport write fails");
+                error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+                assert_eq!(err.can_retry_lenient(), retryable, "preserve retry policy for {kind:?}");
+                assert!(
+                    !err.is_retryable(),
+                    "I/O failures are classified without extra retry markers"
+                );
+                assert_eq!(
+                    err.downcast_any_ref::<io::Error>()
+                        .expect("retain the I/O cause")
+                        .kind(),
+                    kind,
+                    "the original transport failure remains available"
+                );
+            }
+            insta::assert_debug_snapshot!(error_snapshots, "invoke preserves transport retryability", @"
+            [
+                Could not invoke ls-refs
+                
+                Caused by:
+                    0: An IO error occurred when talking to the server
+                    1: broken pipe,
+                Could not invoke ls-refs
+                
+                Caused by:
+                    0: An IO error occurred when talking to the server
+                    1: connection reset,
+                Could not invoke ls-refs
+                
+                Caused by:
+                    0: An IO error occurred when talking to the server
+                    1: permission denied,
+            ]
+            ");
+            Ok(())
+        }
 
         #[test]
         fn extend_preserves_first_seen_order_and_deduplicates_prefixes() {
@@ -278,23 +304,16 @@ pub(crate) mod function {
         }
 
         #[test]
-        fn from_refspecs_keeps_exact_refs_and_dwim_expansions() {
+        fn from_refspecs_keeps_exact_refs_and_dwim_expansions() -> gix_testtools::TestResult {
             let specs = [
-                gix_refspec::parse("HEAD".into(), gix_refspec::parse::Operation::Fetch)
-                    .expect("valid")
-                    .to_owned(),
-                gix_refspec::parse("dwim".into(), gix_refspec::parse::Operation::Fetch)
-                    .expect("valid")
-                    .to_owned(),
+                gix_refspec::parse("HEAD".into(), gix_refspec::parse::Operation::Fetch)?.to_owned(),
+                gix_refspec::parse("dwim".into(), gix_refspec::parse::Operation::Fetch)?.to_owned(),
                 gix_refspec::parse(
                     "refs/tags/prefix*:refs/tags/prefix*".into(),
                     gix_refspec::parse::Operation::Fetch,
-                )
-                .expect("valid")
+                )?
                 .to_owned(),
-                gix_refspec::parse("refs/heads/main".into(), gix_refspec::parse::Operation::Fetch)
-                    .expect("valid")
-                    .to_owned(),
+                gix_refspec::parse("refs/heads/main".into(), gix_refspec::parse::Operation::Fetch)?.to_owned(),
             ];
 
             let prefixes = RefPrefixes::from_refspecs(&specs);
@@ -316,6 +335,7 @@ pub(crate) mod function {
                 .map(BString::from)
                 .collect::<Vec<_>>()
             );
+            Ok(())
         }
     }
 }

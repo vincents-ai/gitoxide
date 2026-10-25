@@ -1,14 +1,13 @@
 use bstr::ByteSlice;
 use gix_diff::{blob::pipeline::WorktreeRoots, rewrites::CopySource};
-use gix_index::entry;
 use gix_status::{
-    index_as_worktree::{traits::FastEq, Change, EntryStatus},
+    index_as_worktree::{Change, EntryStatus, traits::FastEq},
     index_as_worktree_with_renames,
     index_as_worktree_with_renames::{Context, DirwalkContext, Entry, Options, Outcome, Recorder, Sorting, Summary},
 };
 use pretty_assertions::assert_eq;
 
-use crate::{fixture_path, fixture_path_rw_slow};
+use crate::fixture_path;
 
 #[test]
 fn changed_and_untracked_and_renamed() {
@@ -89,7 +88,7 @@ fn changed_and_untracked_and_renamed() {
         &expectations_with_dirwalk,
         Some(rewrites),
         Some(Default::default()),
-        Fixture::ReadOnly,
+        Fixture::ReadOnlyNeedsArchive,
     );
     assert_eq!(
         out.rewrites,
@@ -126,7 +125,7 @@ fn tracked_changed_to_non_file() {
         &[Expectation::Modification {
             rela_path: "file",
             status: Change::Type {
-                worktree_mode: entry::Mode::FILE,
+                worktree_mode: gix_index::entry::Mode::FILE,
             }
             .into(),
         }],
@@ -251,6 +250,8 @@ fn unreadable_untracked() {
 
 enum Fixture {
     ReadOnly,
+    ReadOnlyNeedsArchive,
+    #[cfg(unix)]
     WritableExecuted,
 }
 
@@ -274,16 +275,24 @@ fn fixture_filtered_detailed(
     let (worktree, _tmp) = match fixture {
         Fixture::ReadOnly => {
             let dir = fixture_path(script).join(subdir);
+            (dir, None::<gix_testtools::tempfile::TempDir>)
+        }
+        Fixture::ReadOnlyNeedsArchive => {
+            let dir = gix_testtools::scripted_fixture_read_only_needs_archive(script)
+                .expect("script works")
+                .join(subdir);
             (dir, None)
         }
+        #[cfg(unix)]
         Fixture::WritableExecuted => {
-            let tmp = fixture_path_rw_slow(script);
+            let tmp = crate::fixture_path_rw_slow(script);
             let dir = tmp.path().join(subdir);
             (dir, Some(tmp))
         }
     };
     let git_dir = worktree.join(".git");
-    let index = gix_index::File::at(git_dir.join("index"), gix_hash::Kind::Sha1, false, Default::default()).unwrap();
+    let object_hash = gix_testtools::object_hash();
+    let index = gix_index::File::at(git_dir.join("index"), object_hash, false, Default::default()).unwrap();
     let search = gix_pathspec::Search::from_specs(
         crate::index_as_worktree::to_pathspecs(pathspecs),
         None,
@@ -308,7 +317,7 @@ fn fixture_filtered_detailed(
                 old_root: None,
                 new_root: Some(worktree.to_owned()),
             },
-            gix_filter::Pipeline::new(Default::default(), Default::default()),
+            gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
             vec![],
             gix_diff::blob::pipeline::Options {
                 large_file_threshold_bytes: 0,
@@ -332,19 +341,19 @@ fn fixture_filtered_detailed(
         },
     };
     let options = Options {
-        object_hash: gix_hash::Kind::Sha1,
         tracked_file_modifications: gix_status::index_as_worktree::Options {
             fs: capabilities,
             stat: crate::index_as_worktree::TEST_OPTIONS,
             ..Default::default()
         },
+        fscache: false,
         dirwalk,
         sorting: Some(Sorting::ByPathCaseSensitive),
         rewrites,
     };
 
     let mut recorder = Recorder::default();
-    let objects = gix_odb::at(git_dir.join("objects")).unwrap().into_arc().unwrap();
+    let objects = crate::odb_at(&git_dir, object_hash);
     let outcome = index_as_worktree_with_renames(
         &index,
         &worktree,
@@ -352,7 +361,7 @@ fn fixture_filtered_detailed(
         FastEq,
         crate::index_as_worktree::SubmoduleStatusMock { dirty: false },
         objects,
-        &mut gix_features::progress::Discard,
+        &mut gix_utils::progress::Discard,
         context,
         options,
     )

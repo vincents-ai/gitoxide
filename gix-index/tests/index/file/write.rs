@@ -1,11 +1,12 @@
 use filetime::FileTime;
-use gix_index::{entry, extension, write, write::Options, State, Version};
+use gix_index::{State, Version, entry, extension, write, write::Options};
+use gix_testtools::TestResult;
 
-use crate::index::Fixture::*;
+use crate::Fixture::*;
 
 /// Round-trips should eventually be possible for all files we have, as we write them back exactly as they were read.
 #[test]
-fn roundtrips() -> crate::Result {
+fn roundtrips() -> TestResult {
     let input = [
         (Loose("extended-flags"), only_tree_ext()),
         (Loose("conflicting-file"), only_tree_ext()),
@@ -23,12 +24,22 @@ fn roundtrips() -> crate::Result {
     ];
 
     for (fixture, options) in input {
+        // Loose fixtures only exist as SHA-1 version.
+        if gix_testtools::object_hash() != gix_hash::Kind::Sha1 && matches!(fixture, Loose(_)) {
+            continue;
+        }
+
         let expected = fixture.open();
         let expected_bytes = std::fs::read(fixture.to_path())?;
         let mut out_bytes = Vec::new();
 
         let (actual_version, _digest) = expected.write_to(&mut out_bytes, options)?;
-        let (actual, _) = State::from_bytes(&out_bytes, FileTime::now(), gix_hash::Kind::Sha1, Default::default())?;
+        let (actual, _) = State::from_bytes(
+            &out_bytes,
+            FileTime::now(),
+            gix_testtools::object_hash(),
+            Default::default(),
+        )?;
 
         let name = fixture.to_name();
         compare_states_against_baseline(&actual, actual_version, &expected, options, name);
@@ -38,7 +49,7 @@ fn roundtrips() -> crate::Result {
 }
 
 #[test]
-fn skip_hash() -> crate::Result {
+fn skip_hash() -> TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let path = tmp.path().join("index");
     let mut expected = Loose("conflicting-file").open();
@@ -79,7 +90,7 @@ fn skip_hash() -> crate::Result {
 }
 
 #[test]
-fn roundtrips_sparse_index() -> crate::Result {
+fn roundtrips_sparse_index() -> TestResult {
     // NOTE: I initially tried putting these fixtures into the main roundtrip test above,
     // but the call to `compare_raw_bytes` panics. It seems like git is using a different
     // ordering when it comes to writing the tree extension. Need to investigate more, hence
@@ -109,7 +120,12 @@ fn roundtrips_sparse_index() -> crate::Result {
         let mut out_bytes = Vec::new();
 
         let (actual_version, _) = expected.write_to(&mut out_bytes, options)?;
-        let (actual, _) = State::from_bytes(&out_bytes, FileTime::now(), gix_hash::Kind::Sha1, Default::default())?;
+        let (actual, _) = State::from_bytes(
+            &out_bytes,
+            FileTime::now(),
+            gix_testtools::object_hash(),
+            Default::default(),
+        )?;
 
         compare_states_against_baseline(&actual, actual_version, &expected, options, fixture.to_name());
         // TODO: make this work and re-enable it, once this is done the fixtures can be merged into the main "roundtrip" test
@@ -143,6 +159,11 @@ fn state_comparisons_with_various_extension_configurations() {
         // TODO: this fails because git writes the sdir extension in this case while gitoxide doesn't
         // Generated("v2_sparse_index_no_dirs"),
     ] {
+        // Loose fixtures only exist as SHA-1 version.
+        if gix_testtools::object_hash() != gix_hash::Kind::Sha1 && matches!(fixture, Loose(_)) {
+            continue;
+        }
+
         for options in [
             options_with(write::Extensions::None),
             options_with(write::Extensions::All),
@@ -162,14 +183,14 @@ fn state_comparisons_with_various_extension_configurations() {
             let (actual_version, _digest) = expected.write_to(&mut out, options).unwrap();
 
             let (actual, _) =
-                State::from_bytes(&out, FileTime::now(), gix_hash::Kind::Sha1, Default::default()).unwrap();
+                State::from_bytes(&out, FileTime::now(), gix_testtools::object_hash(), Default::default()).unwrap();
             compare_states(&actual, actual_version, &expected, options, fixture);
         }
     }
 }
 
 #[test]
-fn extended_flags_automatically_upgrade_the_version_to_avoid_data_loss() -> crate::Result {
+fn extended_flags_automatically_upgrade_the_version_to_avoid_data_loss() -> TestResult {
     let mut expected = Generated("v2").open();
     assert_eq!(expected.version(), Version::V2);
     expected.entries_mut()[0].flags.insert(entry::Flags::EXTENDED);
@@ -182,7 +203,7 @@ fn extended_flags_automatically_upgrade_the_version_to_avoid_data_loss() -> crat
 }
 
 #[test]
-fn remove_flag_is_respected() -> crate::Result {
+fn remove_flag_is_respected() -> TestResult {
     let mut index = Generated("v4_more_files_IEOT").open();
     let total_entries = 10;
     assert_eq!(index.entries().len(), total_entries);
@@ -193,7 +214,8 @@ fn remove_flag_is_respected() -> crate::Result {
     let mut buf = Vec::<u8>::new();
     index.write_to(&mut buf, Default::default())?;
 
-    let (state, _checksum) = State::from_bytes(&buf, FileTime::now(), gix_hash::Kind::Sha1, Default::default())?;
+    let (state, _checksum) =
+        State::from_bytes(&buf, FileTime::now(), gix_testtools::object_hash(), Default::default())?;
     assert_eq!(
         state.entries().len(),
         total_entries - entries_to_remove,
@@ -280,10 +302,10 @@ fn compare_raw_bytes(generated: &[u8], expected: &[u8], fixture: &str) {
             let generated = &generated[range_left..range_right];
             let expected = &expected[range_left..range_right];
 
-            panic! {"\n\nRoundtrip failed for index in fixture {:?} at position {:?}\n\
-            \t  Actual: ... {:?} ...\n\
-            \tExpected: ... {:?} ...\n\n\
-            ", &fixture, index, generated, expected}
+            panic! {"\n\nRoundtrip failed for index in fixture {fixture:?} at position {index:?}\n\
+            \t  Actual: ... {generated:?} ...\n\
+            \tExpected: ... {expected:?} ...\n\n\
+            "}
         }
     }
 }

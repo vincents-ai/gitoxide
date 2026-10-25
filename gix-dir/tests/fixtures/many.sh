@@ -191,6 +191,13 @@ git init ignored-with-empty
   touch target/debug/a target/release/b
 )
 
+git init ignored-with-only-empty-dirs
+(cd ignored-with-only-empty-dirs
+  echo "/target/" >> .gitignore
+  git add .gitignore && git commit -m "init"
+  mkdir -p target/empty target/nested/empty
+)
+
 cp -R only-untracked subdir-untracked
 (cd subdir-untracked
   git add .
@@ -350,6 +357,13 @@ git clone submodule multiple-submodules
   git submodule add ../submodule submodule
   git submodule add ../submodule a/b
   git commit -m "add modules"
+)
+
+git clone --no-local multiple-submodules uninitialized-submodules-with-files
+(cd uninitialized-submodules-with-files
+  # Cloning without submodule recursion leaves gitlinks backed by ordinary directories.
+  printf '%s' content >submodule/untracked
+  printf '%s' content >a/b/untracked
 )
 
 git clone submodule one-ignored-submodule

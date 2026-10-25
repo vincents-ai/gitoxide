@@ -27,7 +27,7 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg))]
-#![deny(missing_docs, rust_2018_idioms)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 use bstr::BString;
@@ -42,7 +42,9 @@ pub struct Pattern {
     pub text: BString,
     /// Additional information to help accelerate pattern matching.
     pub mode: pattern::Mode,
-    /// The position in `text` with the first wildcard character, or `None` if there is no wildcard at all.
+    /// The byte position in `text` where raw literal-prefix matching must stop: the first
+    /// `*`, `?`, `[`, or `\`, or `None`.
+    /// `\` introduces an escape during wildcard matching; a final unmatched `\` makes matching fail.
     pub first_wildcard_pos: Option<usize>,
 }
 

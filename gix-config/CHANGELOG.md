@@ -5,13 +5,677 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.62.1 (2026-10-22)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 14 calendar days.
+ - 14 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Merge pull request #3053 from GitoxideLabs/various-improvements ([`2d8dcc4`](https://github.com/GitoxideLabs/gitoxide/commit/2d8dcc466750e474e6c51ac636c24259563a26cf))
+    - Release gix-error v0.5.1, gix-utils v0.5.1 ([`6d1b686`](https://github.com/GitoxideLabs/gitoxide/commit/6d1b68632cec55fa5d3f752ca97daca4e5485b6c))
+    - Merge pull request #3048 from GitoxideLabs/new-release ([`5fccccf`](https://github.com/GitoxideLabs/gitoxide/commit/5fccccfdedd17f7d4b0cc57039d118a3496aa8aa))
+</details>
+
+## 0.62.0 (2026-10-08)
+
+### New Features
+
+ - <csr-id-f83b9691daa38ab38665bd4e3284e9242dbb6408/> add `File::new_section_with_meta()` for explicit section origins
+   Creating a section with its own source, path, include level, or trust previously
+   required changing the file's metadata first. Add `File::new_section_with_meta()`
+   to attach owned or shared metadata directly to one new section, leaving the
+   file's origin and the defaults for subsequent sections unchanged.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 11 commits contributed to the release over the course of 13 calendar days.
+ - 13 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.5.0, gix-date v0.18.0, gix-actor v0.44.0, gix-trace v0.3.0, gix-validate v0.13.0, gix-path v0.14.0, gix-utils v0.5.0, gix-quote v0.10.0, gix-command v0.12.0, gix-hash v0.28.0, gix-hashtable v0.18.0, gix-parallel v0.50.0, gix-fs v0.24.0, gix-tempfile v26.0.0, gix-object v0.66.0, gix-glob v0.29.0, gix-attributes v0.37.0, gix-packetline v0.24.0, gix-filter v0.36.0, gix-chunk v0.10.0, gix-commitgraph v0.41.0, gix-revwalk v0.37.0, gix-traverse v0.63.0, gix-worktree-stream v0.38.0, gix-archive v0.38.0, gix-bitmap v0.6.0, gix-lock v26.0.0, gix-index v0.57.0, gix-config-value v0.21.0, gix-pathspec v0.22.0, gix-ignore v0.24.0, gix-worktree v0.58.0, gix-imara-diff v0.3.1, gix-diff v0.69.0, gix-blame v0.19.0, gix-ref v0.69.0, gix-sec v0.16.0, gix-config v0.62.0, gix-prompt v0.19.0, gix-url v0.40.0, gix-credentials v0.42.0, gix-discover v0.57.0, gix-dir v0.31.0, gix-mailmap v0.36.0, gix-revision v0.51.0, gix-merge v0.22.0, gix-negotiate v0.37.0, gix-note v0.3.0, gix-zlib v0.3.0, gix-pack v0.76.0, gix-odb v0.86.0, gix-refspec v0.47.0, gix-shallow v0.15.0, gix-transport v0.61.0, gix-protocol v0.67.0, gix-status v0.36.0, gix-submodule v0.36.0, gix-worktree-state v0.36.0, gix v0.89.0, gix-fsck v0.27.0, gitoxide-core v0.63.0, gix-tix v0.5.0, gitoxide v0.60.0, safety bump 62 crates ([`0115e90`](https://github.com/GitoxideLabs/gitoxide/commit/0115e902fd0334b8f370766993eb17babed3157f))
+    - Prepare changelogs prior to release ([`794eeef`](https://github.com/GitoxideLabs/gitoxide/commit/794eeef835f8dde0fc8f4fd1d215f304d28d7f77))
+    - Merge pull request #3032 from GitoxideLabs/sec-audit ([`1d7bac7`](https://github.com/GitoxideLabs/gitoxide/commit/1d7bac742f70b72ddda0c7294f4a97566b8db596))
+    - Add `File::new_section_with_meta()` for explicit section origins ([`f83b969`](https://github.com/GitoxideLabs/gitoxide/commit/f83b9691daa38ab38665bd4e3284e9242dbb6408))
+    - Merge pull request #3046 from GitoxideLabs/gix-error-optional-bstr ([`9272d45`](https://github.com/GitoxideLabs/gitoxide/commit/9272d45a1b08ca6f26779389954bd718f8308a80))
+    - Merge pull request #3033 from GitoxideLabs/gix-cli-progress-cleanup ([`80f4b03`](https://github.com/GitoxideLabs/gitoxide/commit/80f4b03257da9a664468e7b75247023187565a34))
+    - Merge pull request #3035 from any-victor/fix/clone-ignores-caller-repository-env ([`d2d078f`](https://github.com/GitoxideLabs/gitoxide/commit/d2d078f25ec2abb18a28a0e635c21d082ef5a830))
+    - Review ([`95043b9`](https://github.com/GitoxideLabs/gitoxide/commit/95043b9895c760fb2cf1f9d7bd8c0d7f84c3e619))
+    - Merge pull request #3022 from GitoxideLabs/release-testtools ([`f819565`](https://github.com/GitoxideLabs/gitoxide/commit/f819565c2c4c56619c4888acef6cf3b8144cbccb))
+    - Use existing error helpers for guards and conversions ([`1c25831`](https://github.com/GitoxideLabs/gitoxide/commit/1c25831152a4ea5a1a016c9b7670a5d1abe25878))
+    - Merge pull request #3020 from GitoxideLabs/report-september ([`5fb3dcf`](https://github.com/GitoxideLabs/gitoxide/commit/5fb3dcf6a86ac0c403776c8820bf5d23f187f7e1))
+</details>
+
+## 0.61.0 (2026-09-25)
+
+### Bug Fixes
+
+ - <csr-id-4e0f8ff9b920e75d9554eb58c76e396e50502346/> Keep rust workspace tests inside disposable repositories and isolated environments
+   <!-- agent -->
+   Direct Git launches inherited repository selectors and user configuration even
+   when tests supplied a fixture working directory. Tests of default-environment
+   APIs and local Git transports also shared the runner's environment. A few
+   journey tests wrote beneath source directories or used the source checkout as
+   the repository under test.
+   
+   Use the shared `gix-testtools` Git command builder for subprocess setup, isolated
+   repository options for fixtures, and isolated child processes where the real
+   environment-reading API must be exercised. Scope CWD changes, copy the fixture
+   used by an object-write test, and run shell journeys through `jtt run`. Keep
+   journey worktrees and example output within their disposable sandboxes and
+   replace the attributes checkout test with a representative fixture repository.
+   Prompt examples also run in isolated children and must build successfully; the
+   old tests could ignore build failures and execute stale cached binaries.
+   
+   The affected Rust crate suites, internal test-tool build, and `max-pure` journey
+   suite pass from a source copy without Git metadata. Signing and Git-daemon
+   checks use only disposable keys, repositories, and local sockets.
+ - <csr-id-01e9d06173b38b2911c2ca66781bc80da3cc5414/> track semantic emptiness across continuations
+   A bunch of refactoring, and more white-space and continuation related conformance with Git.
+   
+   <!-- agent -->
+   Quote delimiters do not append bytes to Git's parsed value, so a raw non-empty
+   continuation chunk may still leave the value empty. Track logical bytes and open
+   quote state when deciding whether continuation indentation is significant.
+ - <csr-id-a441bb2419cf959068fd4db227f3a7bd79aadeb2/> don't indent a value that starts on a continuation line
+   `git` discards whitespace for as long as the value it has accumulated is
+   still empty, so the indentation of the line a value *starts* on is
+   insignificant — whether that is the line with the `=` on it, or a later
+   line reached through a `\` continuation. `parse::from_bytes::value()` only
+   applied this to the first line: after a continuation it set `value_start`
+   to the first byte of the next line, so the indentation became part of the
+   value.
+   
+   Given this `.git/config`:
+   
+   ```ini
+   [alias]
+   lg = \
+   log --oneline --graph
+   ```
+   
+   `git config --get alias.lg` reports `log --oneline --graph`, while
+   `File::raw_value("alias.lg")` reported `\t\tlog --oneline --graph`. The
+   leading tabs are silently carried into whatever runs the alias, and the
+   same happens to any continued value written in this shape, such as a
+   `core.pager` set over two lines.
+   
+   `value()` now emits that indentation as `Event::Whitespace` for as long as
+   every chunk seen so far has been empty — the very sequence that
+   `Event::ValueNotDone` already documents ("A `Newline` event usually
+   follows, followed by either `ValueDone`, `Whitespace`, or another
+   `ValueNotDone`"). Because the events keep the bytes, `to_bstring()` still
+   round-trips the file unchanged, and every consumer already ignores
+   `Whitespace` when concatenating value chunks.
+   
+   Indentation that follows actual content is untouched, matching `git`:
+   `k = abc\` + `\n\tdef` stays `abc\tdef`, and multi-line aliases that begin
+   on the `=` line keep their interior whitespace.
+
+### Changed (BREAKING)
+
+ - <csr-id-7670cefb7809ceaf2bc63b538fb4b9dd569395a2/> migrate errors to gix-error
+   <!-- Byron -->
+   rubberstamp
+ - <csr-id-4b42e0ce80ae934cae4f102f44c392581758608f/> raise MSRV to Rust 1.88
+   <!-- agent -->
+   The newly published `dua-core` 3.3 release used by linked-worktree removal
+   requires Rust 1.88, so raise every workspace crate and the advertised badge
+   together.
+   
+   Keep the MSRV checks buildable by selecting the latest `sysinfo` and `rusqlite`
+   release lines that support Rust 1.88.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 21 commits contributed to the release over the course of 33 calendar days.
+ - 34 days passed between releases.
+ - 5 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.4.0, gix-date v0.17.0, gix-actor v0.43.0, gix-trace v0.2.0, gix-validate v0.12.0, gix-path v0.13.0, gix-utils v0.4.0, gix-quote v0.9.0, gix-command v0.11.0, gix-features v0.50.0, gix-hash v0.27.0, gix-hashtable v0.17.0, gix-fs v0.23.0, gix-tempfile v25.0.0, gix-object v0.65.0, gix-glob v0.28.0, gix-attributes v0.36.0, gix-packetline v0.23.0, gix-filter v0.35.0, gix-chunk v0.9.0, gix-commitgraph v0.40.0, gix-revwalk v0.36.0, gix-traverse v0.62.0, gix-worktree-stream v0.37.0, gix-archive v0.37.0, gix-bitmap v0.5.0, gix-lock v25.0.0, gix-index v0.56.0, gix-config-value v0.20.0, gix-pathspec v0.21.0, gix-ignore v0.23.0, gix-worktree v0.57.0, gix-imara-diff v0.3.0, gix-diff v0.68.0, gix-blame v0.18.0, gix-ref v0.68.0, gix-sec v0.15.0, gix-config v0.61.0, gix-prompt v0.18.0, gix-url v0.39.0, gix-credentials v0.41.0, gix-discover v0.56.0, gix-dir v0.30.0, gix-mailmap v0.35.0, gix-revision v0.50.0, gix-merge v0.21.0, gix-negotiate v0.36.0, gix-note v0.2.0, gix-zlib v0.2.0, gix-pack v0.75.0, gix-odb v0.85.0, gix-macros v0.2.0, gix-refspec v0.46.0, gix-shallow v0.14.0, gix-transport v0.60.0, gix-protocol v0.66.0, gix-status v0.35.0, gix-submodule v0.35.0, gix-worktree-state v0.35.0, gix v0.88.0, gix-fsck v0.26.0, gitoxide-core v0.62.0, gix-tix v0.4.0, gitoxide v0.59.0, safety bump 60 crates ([`37860b3`](https://github.com/GitoxideLabs/gitoxide/commit/37860b34db26096c8187ef55bdf4b76705142733))
+    - Merge pull request #2847 from GitoxideLabs/gix-error-completion ([`6356013`](https://github.com/GitoxideLabs/gitoxide/commit/6356013bca0987c6c97ad7ba9d5347271979b51e))
+    - Use borrowed error inspection throughout the workspace ([`daf73b5`](https://github.com/GitoxideLabs/gitoxide/commit/daf73b5fe5a21e3ddcc58f0882c2d880f48b7860))
+    - Migrate errors to gix-error ([`7670cef`](https://github.com/GitoxideLabs/gitoxide/commit/7670cefb7809ceaf2bc63b538fb4b9dd569395a2))
+    - Merge pull request #2993 from youdie006/fix-blank-space-character-classes ([`65c5dfe`](https://github.com/GitoxideLabs/gitoxide/commit/65c5dfe8895a5de3984070140579165eb373ebd8))
+    - Review ([`0695cd5`](https://github.com/GitoxideLabs/gitoxide/commit/0695cd5b57363cb54c57c4144e97b2c748600ad0))
+    - Merge pull request #2990 from GitoxideLabs/various-improvements ([`c609062`](https://github.com/GitoxideLabs/gitoxide/commit/c609062db5e7030e922a7554143a6bfc52ba317c))
+    - Keep rust workspace tests inside disposable repositories and isolated environments ([`4e0f8ff`](https://github.com/GitoxideLabs/gitoxide/commit/4e0f8ff9b920e75d9554eb58c76e396e50502346))
+    - Merge pull request #2984 from justonemorenight/fix/config-path-tilde-parity ([`92b6508`](https://github.com/GitoxideLabs/gitoxide/commit/92b65081dee8d9f744485e2bbb267f222745c29f))
+    - Auto-review ([`2742f05`](https://github.com/GitoxideLabs/gitoxide/commit/2742f05e95555134318f022715acce377c600b15))
+    - Review ([`181297c`](https://github.com/GitoxideLabs/gitoxide/commit/181297cfa7026fd0dd27b8147250a37911e63582))
+    - Merge pull request #2964 from GitoxideLabs/error-conversion-review ([`36b6310`](https://github.com/GitoxideLabs/gitoxide/commit/36b6310a99f8544c71b16c807ad753c2531b932d))
+    - Merge pull request #2949 from GitoxideLabs/error-conversion-review ([`a095334`](https://github.com/GitoxideLabs/gitoxide/commit/a0953348e4d27f59222c1782119d2539a778cd4d))
+    - Raise MSRV to Rust 1.88 ([`4b42e0c`](https://github.com/GitoxideLabs/gitoxide/commit/4b42e0ce80ae934cae4f102f44c392581758608f))
+    - Merge pull request #2955 from GitoxideLabs/transport-url-encoding ([`7e35849`](https://github.com/GitoxideLabs/gitoxide/commit/7e35849b36646cff9722f6906a4527d64818a374))
+    - Release gix-path v0.12.6, gix-error v0.3.2, gix-command v0.10.1, gix-transport v0.59.2 ([`888677a`](https://github.com/GitoxideLabs/gitoxide/commit/888677ad2d63a2e3930a02add2de0b4b667a5581))
+    - Merge pull request #2950 from jaideeppyne/fix/config-continuation-indentation ([`2f154e2`](https://github.com/GitoxideLabs/gitoxide/commit/2f154e2be33df1cf568c9c1e71fed9246e4b5ffd))
+    - Refactor config parsing to advance input slices ([`26e8c68`](https://github.com/GitoxideLabs/gitoxide/commit/26e8c68ec0517c80d9513ae529ddc35fe4ee7b04))
+    - Track semantic emptiness across continuations ([`01e9d06`](https://github.com/GitoxideLabs/gitoxide/commit/01e9d06173b38b2911c2ca66781bc80da3cc5414))
+    - Don't indent a value that starts on a continuation line ([`a441bb2`](https://github.com/GitoxideLabs/gitoxide/commit/a441bb2419cf959068fd4db227f3a7bd79aadeb2))
+    - Merge pull request #2933 from GitoxideLabs/report-august ([`b8914ff`](https://github.com/GitoxideLabs/gitoxide/commit/b8914ffda5bc8f6ea851aaf1f720140acfe96dbb))
+</details>
+
+## 0.60.0 (2026-08-22)
+
+### Bug Fixes
+
+ - <csr-id-f3986683be2ab089608dbed3d2248a3dd33207ac/> keep standalone comments separate when replacing continued values
+   <!-- agent -->
+   Replacing a continued value that ended at a comment on the next physical line
+   removed the continuation newline, turning the standalone comment into an inline
+   comment on the replacement value.
+   
+   Retain the final continuation newline when an empty ValueDone event is followed
+   by a comment. Cover hash and semicolon comments with LF and CRLF, along with
+   quoted comment markers that remain value content. This matches git config
+   parsing behavior.
+ - <csr-id-d1ef42904e94d254d0027fa6da3659dbf6466d21/> decode the config \b escape to the backspace byte, matching git
+   normalize decoded a \b escape in a quoted config value with out.pop(),
+   deleting the preceding byte, so \"x\bic{}y\" normalized to \"y\" and a
+   leading \b was silently dropped.
+   
+   git decodes \b to the backspace character (0x08). Push 0x08 to match,
+   alongside \n and \t.
+ - <csr-id-cf934f16420018899fa2f4d273ab0352d5b6bc92/> an implicit boolean followed by whitespace is `true`, like in Git.
+   A key without `=` is an implicit boolean and reads as `true`, but only if
+   nothing at all follows it on the line. A single trailing space or tab turned
+   it into `false`:
+   
+   $ printf '[core]\n\tbare \n' > f
+   $ git config --file f --bool core.bare
+   true                                    # git 2.50.1 (Apple Git-155)
+   
+   File::boolean("core.bare")  ->  Ok(Some(false))
+   File::string("core.bare")   ->  Some("")
+   
+   Trailing whitespace after a key is easy to produce by hand or with an editor
+   that does not strip it, and the mistake reaches porcelain: with
+   `[core]\n\tfileMode \n` in `.git/config`, `Repository::filesystem_options()`
+   reports `executable_bit: false`, so `gix` stops honouring the executable bit
+   on a repository where Git still honours it.
+   
+   `key_and_value_range_by_in()` decided implicit-vs-explicit by looking at
+   whether the value event sits directly behind the value name. The parser emits
+   a `Whitespace` event between `SectionValueName` and the synthetic empty
+   `Value` when the key has trailing spaces or tabs, which pushed the value one
+   slot further and made the pair look explicit. Decide on the presence of a
+   `KeyValueSeparator` between name and value instead, which is what the
+   distinction is actually about.
+   
+   Explicit values are unaffected: `bare =`, `bare = ` and `bare=""` still read
+   as `false` with an empty string value, matching Git. Lines that Git accepts
+   only gain the classification Git gives them; lines Git rejects as bad config
+   (a key followed by a bare word or a comment, with no `=`) also become
+   implicit, which is a change but not one Git constrains — see the PR
+   description.
+ - <csr-id-32df2dba854f1f2c5060a2a8751faef5113d8440/> keep the value when a line continuation is followed by an empty line
+   A value ending in a continuation backslash was parsed as the empty string
+   when the continuation line turned out to be empty, discarding everything
+   accumulated before the backslash. With `[core]\n\tk = abc\` as the file
+   content plus the bytes below, `git config --file f core.k` prints `abc`
+   in every case:
+   
+   | bytes after the continuation backslash | git   | gix-config |
+   |----------------------------------------|-------|------------|
+   | `\n\n` (empty line)                    | `abc` | `` (empty) |
+   | `\n; comment`                          | `abc` | `` (empty) |
+   | `\n` then EOF                          | `abc` | `` (empty) |
+   | `\n\n[other]\n`                        | `abc` | `` (empty) |
+   | `\r\n` then EOF                        | `abc` | `` (empty) |
+   | EOF, no trailing newline               | `abc` | `abc`      |
+   | `\n   \n` (blank line with spaces)     | `abc` | `abc`      |
+   
+   `value()` emits one `ValueNotDone` per continued chunk and terminates the
+   sequence with `ValueDone`, which is what every consumer concatenates. When
+   the final chunk was empty it took the empty-value shortcut and dispatched a
+   bare `Event::Value` instead, and a bare `Value` reads as a complete value,
+   so the preceding `ValueNotDone` chunks were dropped. That also broke the
+   invariant documented on `Event::ValueNotDone`, that `ValueDone` follows it.
+   
+   The shortcut now dispatches `ValueDone` when a continuation was seen and
+   `Value` otherwise, matching the distinction the non-empty path already
+   makes. Values without a continuation are unaffected, as are continuation
+   lines holding only whitespace - those never reached the shortcut, because
+   the whitespace is trimmed after the branch rather than before it.
+   
+   Rows 1, 2 and 4 are a regression from 91c854e7b (`fix!: remove winnow and
+   replace it with hand-implemented parsers everywhere`), which first shipped
+   in gix-config 0.56.0. Verified by building f26762623, whose `gix-config/src`
+   tree (b2fda5bc7) is identical to the one tagged gix-config-v0.55.0, so that
+   measurement is of released 0.55.0 and 0.55.0 is demonstrably the last
+   release with the correct behaviour. It is also the last building ancestor:
+   the immediate parent b060eb24a does not build in isolation, as `gix-object`
+   fails against the changed `gix-actor` API until its "adapt to changes"
+   follow-up. Rows 3 and 5 were already wrong at f26762623, so those two are
+   long-standing rather than regressed. Row 6 was a parse error before the
+   rewrite, fixed by 51279734f.
+ - <csr-id-e7548bad2f7c521c72242c4e54cca6f8c3721671/> normalize expanded git-dir paths on Windows during include matching.
+   <!-- agent -->
+   Git matches includeIf.gitdir conditions against forward-slash paths on
+   Windows. Relative git-dir contexts in gix-config were initially normalized,
+   but their realpath-expanded fallback retained native backslashes and failed to
+   match forward-slash conditions. Normalize that fallback as Git does and make
+   the environment test use the matching form explicitly.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 19 commits contributed to the release over the course of 30 calendar days.
+ - 30 days passed between releases.
+ - 5 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Update manifests prior to release ([`ebe9095`](https://github.com/GitoxideLabs/gitoxide/commit/ebe9095f2888d3c12447ea5eed9d0afdb0fd5aeb))
+    - Merge pull request #2905 from GitoxideLabs/various-improvements ([`f3bbfad`](https://github.com/GitoxideLabs/gitoxide/commit/f3bbfadd4b4f1d72c85c62eb3d7ae337c922f945))
+    - Adapt to changes in `gix-testtools` ([`0cbe539`](https://github.com/GitoxideLabs/gitoxide/commit/0cbe53971687fb3b1959925aa9d8dc89deb5b474))
+    - Merge pull request #2903 from GitoxideLabs/traverse-dupl-tip ([`70e98a0`](https://github.com/GitoxideLabs/gitoxide/commit/70e98a0c967a57a4f06bcd0cae66863d766124d6))
+    - Keep standalone comments separate when replacing continued values ([`f398668`](https://github.com/GitoxideLabs/gitoxide/commit/f3986683be2ab089608dbed3d2248a3dd33207ac))
+    - Merge pull request #2867 from GitoxideLabs/fix-url-authority-parsing ([`cc3ee80`](https://github.com/GitoxideLabs/gitoxide/commit/cc3ee8060ad7a32ee8d2eb9139854be7f7561b70))
+    - Release gix-path v0.12.4, gix-command v0.9.2, gix-config-value v0.19.1, gix-url v0.37.1, gix-credentials v0.39.1, gix-transport v0.58.1 ([`ab4fcb0`](https://github.com/GitoxideLabs/gitoxide/commit/ab4fcb0364ec4d01115595198f383b1ad9c29808))
+    - Merge pull request #2858 from shuvamk/fix/config-implicit-boolean-trailing-whitespace ([`77dc1ff`](https://github.com/GitoxideLabs/gitoxide/commit/77dc1ff87fc9c95fda40134e7ff4aff132c966a8))
+    - Review ([`1bea62a`](https://github.com/GitoxideLabs/gitoxide/commit/1bea62aec0a10f3d7f7175f0c56d5d7d65551d9d))
+    - Merge pull request #2860 from hdimer/fix/config-backspace-escape ([`484ebac`](https://github.com/GitoxideLabs/gitoxide/commit/484ebac1fc590a92131293cf26715918d74ab0d7))
+    - Review ([`4a17fdd`](https://github.com/GitoxideLabs/gitoxide/commit/4a17fdd4ffac882cf5e660ffc0ef8aca84ff8563))
+    - Decode the config \b escape to the backspace byte, matching git ([`d1ef429`](https://github.com/GitoxideLabs/gitoxide/commit/d1ef42904e94d254d0027fa6da3659dbf6466d21))
+    - An implicit boolean followed by whitespace is `true`, like in Git. ([`cf934f1`](https://github.com/GitoxideLabs/gitoxide/commit/cf934f16420018899fa2f4d273ab0352d5b6bc92))
+    - Merge pull request #2856 from shuvamk/fix/config-empty-line-continuation ([`b95db7c`](https://github.com/GitoxideLabs/gitoxide/commit/b95db7ca8f7037e0ba570e2329bdbe4dc10a24c8))
+    - Review ([`afe2234`](https://github.com/GitoxideLabs/gitoxide/commit/afe2234c79095428c59bf46a416e540e1b064ab3))
+    - Keep the value when a line continuation is followed by an empty line ([`32df2db`](https://github.com/GitoxideLabs/gitoxide/commit/32df2dba854f1f2c5060a2a8751faef5113d8440))
+    - Merge pull request #2846 from GitoxideLabs/open-options-on-clone ([`50713b0`](https://github.com/GitoxideLabs/gitoxide/commit/50713b017a455431b504c5b2afb65949c8ad9261))
+    - Normalize expanded git-dir paths on Windows during include matching. ([`e7548ba`](https://github.com/GitoxideLabs/gitoxide/commit/e7548bad2f7c521c72242c4e54cca6f8c3721671))
+    - Merge pull request #2812 from GitoxideLabs/report-july ([`ae8845a`](https://github.com/GitoxideLabs/gitoxide/commit/ae8845a47c4c87e0996a119822106cf09036340b))
+</details>
+
+## 0.59.0 (2026-07-23)
+
+### New Features
+
+ - <csr-id-d125a59a25540f5945ce235a897b8ef6709624bb/> add `parse::format` to normalize git-config whitespace.
+   Adds `gix_config::parse::format::normalize(input, &Options)`, which re-emits a
+   single config file with sanitized whitespace without resolving includes. Values,
+   comments and section headers are preserved verbatim; only insignificant
+   whitespace, the `=` separator and newlines are rewritten.
+   
+   `Options` controls indentation (two spaces by default; tabs or none also
+   available), spacing around `=`, the newline sequence (detect/LF/CRLF), the
+   trailing newline, and optional blank-line collapsing.
+   
+   This is the library portion; the CLI will follow separately.
+ - <csr-id-ec2895f89f0f76f95ed84d1bc14ccfa927bce504/> return config values with their containing sections via `File::*_with_sections()` methods.
+   That way it's easier to know where a value is coming from.
+   Also streamline arguments and available methods for concistency.
+ - <csr-id-1ce5b56af685e34ccfc564649b51d357b2e24073/> add `SectionMut::rename()` for precise single-section renames.
+   This is important now that `File::rename_section*()` renames all matching
+   sections.
+
+### Bug Fixes
+
+ - <csr-id-b92d0ffe44234894b8f531c2c05406c0eaa30afa/> rename all matching sections in File::rename_section(), instead of just the last matching one.
+   This is the correct behaviour and is what Git uses, even though it could break previous users in a setting
+   where there are global configurations, like remote sections.
+
+### Changed (BREAKING)
+
+ - <csr-id-0887485bbd735ba442138deb58f6a0f858d7915c/> validate config value names internally and use `AsBStrOpt` for value pushes.
+   This makes using the APIs much more convenient.
+
+### Chore (BREAKING)
+
+ - <csr-id-6aa934a3f7734902b6c3c7baaff84b51b3cf0226/> adapt to changes in `gix-config`
+   Marked as breaking explicitly to as we know paramter types were
+   changed to use convenience traits.
+
+### New Features (BREAKING)
+
+ - <csr-id-0e3b35bd461ec64867068a548a85d50944abd870/> make parsed configuration files lifetime-free
+   Store parsed configuration data in a self-contained backing buffer, with
+   event payloads represented as compact spans into it. This removes the
+   input lifetime from `File` and `Events`, making parsed configurations
+   easier to return, store, move, and combine.
+   
+   Expose data through lightweight `EventRef`, `SectionRef`, `HeaderRef`,
+   and `BodyRef` views. This retains efficient borrowed access while keeping
+   ownership details out of the primary API.
+   
+   - Unify parsing under `Events::from_bytes()` and remove
+   `from_bytes_owned()`.
+   - Add `Events::iter()`, `frontmatter()`, and `sections()` for
+   non-consuming traversal.
+   - Return owned `BString` values from lookups, avoiding `Cow` handling.
+   - Simplify optional typed lookups from `Option<Result<T, E>>` to
+   `Result<Option<T>, E>`.
+   - Accept common string and byte-string inputs through `AsBStr` and
+   `IntoBStringOpt`.
+   - Allow concise calls such as `new_section("remote", "origin")` without
+   constructing `Option<Cow<...>>`.
+   - Reduce mutable value and section handles to the lifetime of their
+   active file borrow.
+   
+   Introduce explicit section ownership: `Section` is self-contained and
+   can be removed, edited, and inserted into another file, while
+   `SectionRef` and `SectionMut` provide borrowed access.
+   
+   Preserve original subsection spelling for serialization while retaining
+   decoded names for lookup. Configuration equality now also compares
+   section and value names case-insensitively, matching Git semantics.
+   
+   Add benchmarks covering section, value, subsection, and multi-value
+   lookups across configurations of varying sizes.
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-784323a088a7d98d08c17ddfc1e078b98431d2bf/> simplify gix-config section lookup acceleration
+   breaking change for safety, as parameter types were changed.
+   
+   --- agent
+   
+   Replace the terminal/non-terminal enum vector with a direct boxed lookup
+   record, use a Vec for section order, and centralize ordered insertion and
+   removal. Empty lookup buckets are removed instead of becoming special cases.
+   
+   This removes 137 production lines, including 108 lines from the lookup
+   utility, while adding targeted ordering and cleanup coverage.
+   
+   Back-to-back lookup benchmarks against the previous revision show:
+   
+   - section-name lookup: +0.4% at 10 and 100 sections, +4.2% at 1,000
+   - subsection lookup: 5.7% to 9.1% faster
+   - all-sections lookup: between 5.5% faster and 4.7% slower
+   - isolated complete-value lookup: +0.8%, with no significant change
+   
+   Thus all lookup groups remain within the 5% parity target, with subsection
+   lookup becoming consistently faster.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 22 commits contributed to the release.
+ - 31 days passed between releases.
+ - 8 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#2594](https://github.com/GitoxideLabs/gitoxide/issues/2594)
+
+### Thanks Clippy
+
+<csr-read-only-do-not-edit/>
+
+[Clippy](https://github.com/rust-lang/rust-clippy) helped 1 time to make code idiomatic. 
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#2594](https://github.com/GitoxideLabs/gitoxide/issues/2594)**
+    - Add `parse::format` to normalize git-config whitespace. ([`d125a59`](https://github.com/GitoxideLabs/gitoxide/commit/d125a59a25540f5945ce235a897b8ef6709624bb))
+ * **Uncategorized**
+    - Release gix-actor v0.41.2, gix-features v0.49.0, gix-hash v0.26.0, gix-hashtable v0.16.0, gix-object v0.63.0, gix-glob v0.27.0, gix-attributes v0.34.0, gix-packetline v0.22.0, gix-filter v0.33.0, gix-fs v0.22.0, gix-chunk v0.7.3, gix-commitgraph v0.38.0, gix-revwalk v0.34.0, gix-traverse v0.60.0, gix-worktree-stream v0.35.0, gix-archive v0.35.0, gix-bitmap v0.3.3, gix-tempfile v24.0.0, gix-lock v24.0.0, gix-index v0.54.0, gix-pathspec v0.19.0, gix-ignore v0.22.0, gix-worktree v0.55.0, gix-imara-diff v0.2.4, gix-diff v0.66.0, gix-blame v0.16.0, gix-ref v0.66.0, gix-config v0.59.0, gix-discover v0.54.0, gix-dir v0.28.0, gix-mailmap v0.33.2, gix-revision v0.48.0, gix-merge v0.19.0, gix-negotiate v0.34.0, gix-zlib v0.1.0, gix-pack v0.73.0, gix-odb v0.83.0, gix-refspec v0.44.0, gix-shallow v0.13.0, gix-transport v0.58.0, gix-protocol v0.64.0, gix-status v0.33.0, gix-submodule v0.33.0, gix-worktree-state v0.33.0, gix v0.86.0, gix-fsck v0.24.0, gitoxide-core v0.60.0, gix-tix v0.1.0, gitoxide v0.56.0, safety bump 40 crates ([`842bc44`](https://github.com/GitoxideLabs/gitoxide/commit/842bc447e3aeacf5d9d36f7f8a01068eda4b7999))
+    - Update changelogs prior to release ([`cb6ec7d`](https://github.com/GitoxideLabs/gitoxide/commit/cb6ec7dce283943d811b1600b577f586d7a13e1f))
+    - Release gix-trace v0.1.21, gix-validate v0.11.3, gix-path v0.12.3, gix-utils v0.3.5, gix-config-value v0.19.0, gix-prompt v0.16.0, gix-sec v0.14.2, gix-url v0.37.0, gix-credentials v0.39.0, safety bump 18 crates ([`f0ec710`](https://github.com/GitoxideLabs/gitoxide/commit/f0ec71076aa1cef3181b77946ee556a89c651b8e))
+    - Merge pull request #2636 from ameyypawar/gix-config-formatter ([`cfd3899`](https://github.com/GitoxideLabs/gitoxide/commit/cfd389911b33a80576519a228e60d51a789df857))
+    - Review ([`1825e85`](https://github.com/GitoxideLabs/gitoxide/commit/1825e858f5145f536dc7b78f756e65857ae96f2d))
+    - Merge pull request #2725 from GitoxideLabs/gix-config-improvements ([`5982dfe`](https://github.com/GitoxideLabs/gitoxide/commit/5982dfe4fdc1f0375fea540b308f9a248e0c7218))
+    - Adapt to changes in `gix-config` ([`6aa934a`](https://github.com/GitoxideLabs/gitoxide/commit/6aa934a3f7734902b6c3c7baaff84b51b3cf0226))
+    - Return config values with their containing sections via `File::*_with_sections()` methods. ([`ec2895f`](https://github.com/GitoxideLabs/gitoxide/commit/ec2895f89f0f76f95ed84d1bc14ccfa927bce504))
+    - Validate config value names internally and use `AsBStrOpt` for value pushes. ([`0887485`](https://github.com/GitoxideLabs/gitoxide/commit/0887485bbd735ba442138deb58f6a0f858d7915c))
+    - Add `SectionMut::rename()` for precise single-section renames. ([`1ce5b56`](https://github.com/GitoxideLabs/gitoxide/commit/1ce5b56af685e34ccfc564649b51d357b2e24073))
+    - Rename all matching sections in File::rename_section(), instead of just the last matching one. ([`b92d0ff`](https://github.com/GitoxideLabs/gitoxide/commit/b92d0ffe44234894b8f531c2c05406c0eaa30afa))
+    - Simplify gix-config section lookup acceleration ([`784323a`](https://github.com/GitoxideLabs/gitoxide/commit/784323a088a7d98d08c17ddfc1e078b98431d2bf))
+    - Merge pull request #2722 from GitoxideLabs/reasons ([`c16b5a1`](https://github.com/GitoxideLabs/gitoxide/commit/c16b5a1892704b7c72a253bdd74a6848dd61032a))
+    - Replace lint allowances with expectations ([`43ff87a`](https://github.com/GitoxideLabs/gitoxide/commit/43ff87a73897b70313e3a58e7de82231be5b59ad))
+    - Merge pull request #2667 from GitoxideLabs/lifetime-free-config-parser ([`55b5158`](https://github.com/GitoxideLabs/gitoxide/commit/55b51580c2b018f9f35b4b865fe86a28a5c0ff84))
+    - Make parsed configuration files lifetime-free ([`0e3b35b`](https://github.com/GitoxideLabs/gitoxide/commit/0e3b35bd461ec64867068a548a85d50944abd870))
+    - Merge pull request #2714 from GitoxideLabs/fix-credentials-parsing ([`cf3053a`](https://github.com/GitoxideLabs/gitoxide/commit/cf3053a3c18e2de788cdaa9f41b5bd343bdc0091))
+    - Release gix-path v0.12.2, gix-error v0.2.5, gix-utils v0.3.4, gix-date v0.15.6, gix-url v0.36.2, gix-credentials v0.38.2 ([`27aec47`](https://github.com/GitoxideLabs/gitoxide/commit/27aec474c113cc885d44631b329454dc1ad0fed2))
+    - Merge pull request #2702 from ameyypawar/fix/2694-exn-source-chain ([`e9c973d`](https://github.com/GitoxideLabs/gitoxide/commit/e9c973d9476bef293bec89cd683cb60b02a85e52))
+    - Thanks clippy ([`d533f0c`](https://github.com/GitoxideLabs/gitoxide/commit/d533f0c7a6a6b20cbcfe5a755d472b921e38b4a1))
+    - Merge pull request #2646 from GitoxideLabs/report ([`1b1541e`](https://github.com/GitoxideLabs/gitoxide/commit/1b1541ed7a457afd48385c1ee39113949a9f5263))
+</details>
+
+## 0.58.0 (2026-06-22)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release over the course of 27 calendar days.
+ - 27 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-date v0.15.5, gix-hashtable v0.15.2, gix-object v0.62.0, gix-attributes v0.33.2, gix-filter v0.32.0, gix-revwalk v0.33.0, gix-traverse v0.59.0, gix-worktree-stream v0.34.0, gix-archive v0.34.0, gix-tempfile v23.0.2, gix-index v0.53.0, gix-worktree v0.54.0, gix-imara-diff v0.2.3, gix-diff v0.65.0, gix-blame v0.15.0, gix-ref v0.65.0, gix-config v0.58.0, gix-discover v0.53.0, gix-dir v0.27.0, gix-revision v0.47.0, gix-merge v0.18.0, gix-negotiate v0.33.0, gix-pack v0.72.0, gix-odb v0.82.0, gix-refspec v0.43.0, gix-transport v0.57.2, gix-protocol v0.63.0, gix-status v0.32.0, gix-submodule v0.32.0, gix-worktree-state v0.32.0, gix v0.85.0, gix-fsck v0.23.0, gitoxide-core v0.59.0, gitoxide v0.55.0, safety bump 28 crates ([`6428edc`](https://github.com/GitoxideLabs/gitoxide/commit/6428edc82fc8a16d5ef34ca2d49aa6fdff3645fe))
+    - Merge pull request #2618 from GitoxideLabs/report ([`f7d4f33`](https://github.com/GitoxideLabs/gitoxide/commit/f7d4f33b58503996ae90497b69ce4c3a757982ac))
+</details>
+
+## 0.57.0 (2026-05-26)
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 13 commits contributed to the release over the course of 28 calendar days.
+ - 28 days passed between releases.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.2.4, gix-date v0.15.4, gix-actor v0.41.1, gix-trace v0.1.20, gix-validate v0.11.2, gix-path v0.12.1, gix-utils v0.3.3, gix-features v0.48.1, gix-hash v0.25.1, gix-hashtable v0.15.1, gix-object v0.61.0, gix-glob v0.26.1, gix-quote v0.7.2, gix-attributes v0.33.1, gix-command v0.9.1, gix-packetline v0.21.4, gix-filter v0.31.0, gix-fs v0.21.2, gix-chunk v0.7.2, gix-commitgraph v0.37.1, gix-revwalk v0.32.0, gix-traverse v0.58.0, gix-worktree-stream v0.33.0, gix-archive v0.33.0, gix-bitmap v0.3.2, gix-tempfile v23.0.1, gix-lock v23.0.1, gix-index v0.52.0, gix-config-value v0.18.1, gix-pathspec v0.18.1, gix-ignore v0.21.1, gix-worktree v0.53.0, gix-imara-diff v0.2.2, gix-diff v0.64.0, gix-blame v0.14.0, gix-ref v0.64.0, gix-sec v0.14.1, gix-config v0.57.0, gix-prompt v0.15.1, gix-url v0.36.1, gix-credentials v0.38.1, gix-discover v0.52.0, gix-dir v0.26.0, gix-mailmap v0.33.1, gix-revision v0.46.0, gix-merge v0.17.0, gix-negotiate v0.32.0, gix-pack v0.71.0, gix-odb v0.81.0, gix-refspec v0.42.0, gix-shallow v0.12.1, gix-transport v0.57.1, gix-protocol v0.62.0, gix-status v0.31.0, gix-submodule v0.31.0, gix-worktree-state v0.31.0, gix v0.84.0, gix-fsck v0.22.0, gitoxide-core v0.58.0, gitoxide v0.54.0, safety bump 27 crates ([`10c58bb`](https://github.com/GitoxideLabs/gitoxide/commit/10c58bb56597d9335611da121aac21f9b09b6e5b))
+    - Merge pull request #2590 from GitoxideLabs/independent-testtools ([`575113d`](https://github.com/GitoxideLabs/gitoxide/commit/575113dfb10b3ba12eb57f57a81b241e773968bd))
+    - Move single-file directories in tests to simple module files. ([`1bc4ce3`](https://github.com/GitoxideLabs/gitoxide/commit/1bc4ce34214455968d00a3c94da2d7582a664a41))
+    - Adapt to changes in `gix-testtools` ([`ce9e6bd`](https://github.com/GitoxideLabs/gitoxide/commit/ce9e6bded2cb47cc9b995f8882d98c09ba5c2c8b))
+    - Merge pull request #2573 from cruessler/run-gix-traverse-tests-with-sha-256 ([`278d7ec`](https://github.com/GitoxideLabs/gitoxide/commit/278d7ec395124b3ce00db6f3e029265bfec8ccd1))
+    - Cleanup `sha1` feature in `gix` to just set what's needed. ([`16a6fc4`](https://github.com/GitoxideLabs/gitoxide/commit/16a6fc44cf331464ee42c78a9c9ccb07aaf05aa1))
+    - Merge pull request #2575 from SarthakB11/fix/issue-2316 ([`4743361`](https://github.com/GitoxideLabs/gitoxide/commit/4743361e69238245b77f5687620b20652e62a23c))
+    - Review ([`1980190`](https://github.com/GitoxideLabs/gitoxide/commit/19801900fdce7b7db3ab4da9866c44d7fea5598e))
+    - Document why each fixture archive is .gitignored ([`e3d5a04`](https://github.com/GitoxideLabs/gitoxide/commit/e3d5a0474574dbb546a61eefc91a03c2df72df74))
+    - Merge pull request #2568 from GitoxideLabs/dependabot/cargo/cargo-56d6b174d8 ([`ab2fee1`](https://github.com/GitoxideLabs/gitoxide/commit/ab2fee14651202fcb7b3d8178932090c73492014))
+    - Update crates to Rust 2024 edition ([`2cb17b2`](https://github.com/GitoxideLabs/gitoxide/commit/2cb17b2e7f6009693a55af907614f705a29d8c29))
+    - Raise MSRV for hash dependency updates ([`3675a8d`](https://github.com/GitoxideLabs/gitoxide/commit/3675a8d61b17845a783bc27912a3f52ac273a4af))
+    - Merge pull request #2546 from GitoxideLabs/fix-2545 ([`adb8328`](https://github.com/GitoxideLabs/gitoxide/commit/adb8328952478c443ead5f5a8c6851928b377b37))
+</details>
+
+## 0.56.0 (2026-04-28)
+
+### Bug Fixes
+
+ - <csr-id-51279734f848600ccd76b8256e77bf06f429dd60/> Allow more pathological cases during parsing just like Git
+   This improves Git conformity, which is also pretty lenient.
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-d4439cd5b5aa82c126198aa57de6a9ebbc15d371/> Limit Commit and Tag parsing to a given `gix_hash::Kind`
+   Doing so adds conformity with Git, but also simplifies the parser
+   which now only parse hex-hashes of a single valid length.
+ - <csr-id-91c854e7b9f41738d0fde825cd474b8c00c1a49b/> remove `winnow` and replace it with hand-implemented parsers everywhere.
+   This will allow for simplified maintenance and editing (both human and machine)
+   down the road, and enable additional performance optimisations.
+   
+   Parser compbinators to me ultimately were a failed experiment as I couldn't maintain
+   them anyway, with it being too difficult for me to grasp and express everything
+   in its very own kind of language, with a lot of different things to consider.
+   
+   Note that this also removes detailed errors from all parsers that previously
+   used `winnow`, with the option to re-add those if there is demand.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 5 commits contributed to the release over the course of 2 calendar days.
+ - 4 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.2.3, gix-date v0.15.3, gix-actor v0.41.0, gix-path v0.12.0, gix-features v0.48.0, gix-hash v0.25.0, gix-hashtable v0.15.0, gix-object v0.60.0, gix-glob v0.26.0, gix-attributes v0.33.0, gix-command v0.9.0, gix-filter v0.30.0, gix-fs v0.21.0, gix-commitgraph v0.37.0, gix-revwalk v0.31.0, gix-traverse v0.57.0, gix-worktree-stream v0.32.0, gix-archive v0.32.0, gix-tempfile v23.0.0, gix-lock v23.0.0, gix-index v0.51.0, gix-config-value v0.18.0, gix-pathspec v0.18.0, gix-ignore v0.21.0, gix-worktree v0.52.0, gix-imara-diff v0.2.1, gix-diff v0.63.0, gix-blame v0.13.0, gix-ref v0.63.0, gix-sec v0.14.0, gix-config v0.56.0, gix-prompt v0.15.0, gix-url v0.36.0, gix-credentials v0.38.0, gix-discover v0.51.0, gix-dir v0.25.0, gix-mailmap v0.33.0, gix-revision v0.45.0, gix-merge v0.16.0, gix-negotiate v0.31.0, gix-pack v0.70.0, gix-odb v0.80.0, gix-refspec v0.41.0, gix-shallow v0.12.0, gix-transport v0.57.0, gix-protocol v0.61.0, gix-status v0.30.0, gix-submodule v0.30.0, gix-worktree-state v0.30.0, gix v0.83.0, gix-fsck v0.21.0, gitoxide-core v0.57.0, gitoxide v0.53.0, safety bump 48 crates ([`53f880c`](https://github.com/GitoxideLabs/gitoxide/commit/53f880c7604232c367870088176e42efd8a5b783))
+    - Limit Commit and Tag parsing to a given `gix_hash::Kind` ([`d4439cd`](https://github.com/GitoxideLabs/gitoxide/commit/d4439cd5b5aa82c126198aa57de6a9ebbc15d371))
+    - Allow more pathological cases during parsing just like Git ([`5127973`](https://github.com/GitoxideLabs/gitoxide/commit/51279734f848600ccd76b8256e77bf06f429dd60))
+    - Remove `winnow` and replace it with hand-implemented parsers everywhere. ([`91c854e`](https://github.com/GitoxideLabs/gitoxide/commit/91c854e7b9f41738d0fde825cd474b8c00c1a49b))
+    - Merge pull request #2540 from GitoxideLabs/reporting ([`4d5ba23`](https://github.com/GitoxideLabs/gitoxide/commit/4d5ba231685e8ff36195603c57193aa1cd21fa8e))
+</details>
+
+## 0.55.0 (2026-04-24)
+
+### Documentation
+
+ - <csr-id-b1102c24055bbf15987a6a8c2e66338aa8a56438/> add crate-root doctests
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-672d7cd853fcb25223d750261aac4e4f0f8e528c/> accept owned `AsKey` inputs in raw setters
+   `set_raw_value()` and `set_raw_value_filter()` no longer require`
+   config's `'event` lifetime internally.
+   
+   This makes the setter APIs consistent with the read-only raw accessors
+   and allows short-lived key inputs, such as String-backed values, to be
+   used without forcing an extra borrow at the call site.
+   
+   Add a regression test covering short-lived keys passed to
+   set_raw_value()
+ - <csr-id-cf6c4035e40ca8790a010f4e268ffe51004eeecb/> allow `&str` to be parsed as key properly
+   Previously there were lifetime issue because the key
+   needed the same lifetime as the underlying parsed file,
+   which was hard to accomplish even with `&'static str'`
+   as it really needed "&'static &'static str".
+   
+   However, this also means that owned keys can't be passed
+   anymore.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 16 commits contributed to the release over the course of 32 calendar days.
+ - 33 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Update changelogs prior to release ([`f9fbcba`](https://github.com/GitoxideLabs/gitoxide/commit/f9fbcba28278f3fb2ad7969c2d00ac6765165724))
+    - Run more fuzz artifacts as part of the test-suite ([`a1ad31b`](https://github.com/GitoxideLabs/gitoxide/commit/a1ad31bd5767a0528c7fd023de3b75ee1a3f9bf5))
+    - Merge pull request #2530 from GitoxideLabs/advisories ([`63b8419`](https://github.com/GitoxideLabs/gitoxide/commit/63b841907ce30b36bb50da5aae3a9e1a06eadf64))
+    - Add corpus-builder scripts when corpus files are available; auto-run artifacts in test suite ([`e64e3b8`](https://github.com/GitoxideLabs/gitoxide/commit/e64e3b8c3454e1c2da3e349e413397775088387e))
+    - Add fuzz tests for 10 more crates, and related fixes ([`0396152`](https://github.com/GitoxideLabs/gitoxide/commit/03961523d0208a12b7b480b14d57793049600283))
+    - Merge pull request #2518 from GitoxideLabs/improvements ([`444a92b`](https://github.com/GitoxideLabs/gitoxide/commit/444a92b0fa1df406cf2f36f8dbe82c2859e04e0b))
+    - Make `package.include` patterns more specific so they don't match ignored files ([`c2c917f`](https://github.com/GitoxideLabs/gitoxide/commit/c2c917fce56c40a9af0d06bd603b7d1d2e51474f))
+    - Merge pull request #2499 from GitoxideLabs/dependabot/cargo/cargo-17cc682121 ([`44020e0`](https://github.com/GitoxideLabs/gitoxide/commit/44020e01d2f037d94a3625fbc323d203718dcc66))
+    - Bump the cargo group with 26 updates ([`9d04035`](https://github.com/GitoxideLabs/gitoxide/commit/9d040352ca432b23e666eb0163267170d0926401))
+    - Merge pull request #2494 from GitoxideLabs/improvements ([`50fb46f`](https://github.com/GitoxideLabs/gitoxide/commit/50fb46f17acba7d75d4ed6795b7b9cef484e34c6))
+    - Accept owned `AsKey` inputs in raw setters ([`672d7cd`](https://github.com/GitoxideLabs/gitoxide/commit/672d7cd853fcb25223d750261aac4e4f0f8e528c))
+    - Merge pull request #2493 from GitoxideLabs/improvements ([`af1ad55`](https://github.com/GitoxideLabs/gitoxide/commit/af1ad55a12a949bdcb77688757690020b23188c9))
+    - Allow `&str` to be parsed as key properly ([`cf6c403`](https://github.com/GitoxideLabs/gitoxide/commit/cf6c4035e40ca8790a010f4e268ffe51004eeecb))
+    - Merge pull request #2487 from GitoxideLabs/top-level-examples ([`29c275e`](https://github.com/GitoxideLabs/gitoxide/commit/29c275e934e145120cf6f4412a568e629ada80ce))
+    - Add crate-root doctests ([`b1102c2`](https://github.com/GitoxideLabs/gitoxide/commit/b1102c24055bbf15987a6a8c2e66338aa8a56438))
+    - Merge pull request #2480 from GitoxideLabs/report ([`98bae84`](https://github.com/GitoxideLabs/gitoxide/commit/98bae84fe534879899489c6f2c5e8cfcc863116d))
+</details>
+
+## 0.54.0 (2026-03-22)
+
+### New Features
+
+ - <csr-id-383291689c659a2cc0bee7687f5a9b9f7a3659a4/> add `sha1` and `sha256` features to `gix`.
+   This way one can control which hashes are compiled in exactly,
+   while having reasonable defaults automatically.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 9 commits contributed to the release.
+ - 28 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release gix-error v0.2.1, gix-date v0.15.1, gix-path v0.11.2, gix-features v0.46.2, gix-hash v0.23.0, gix-hashtable v0.13.0, gix-object v0.58.0, gix-packetline v0.21.2, gix-filter v0.28.0, gix-fs v0.19.2, gix-commitgraph v0.35.0, gix-revwalk v0.29.0, gix-traverse v0.55.0, gix-worktree-stream v0.30.0, gix-archive v0.30.0, gix-tempfile v21.0.2, gix-lock v21.0.2, gix-index v0.49.0, gix-pathspec v0.16.1, gix-ignore v0.19.1, gix-worktree v0.50.0, gix-diff v0.61.0, gix-blame v0.11.0, gix-ref v0.61.0, gix-sec v0.13.2, gix-config v0.54.0, gix-prompt v0.14.1, gix-credentials v0.37.1, gix-discover v0.49.0, gix-dir v0.23.0, gix-revision v0.43.0, gix-merge v0.14.0, gix-negotiate v0.29.0, gix-pack v0.68.0, gix-odb v0.78.0, gix-refspec v0.39.0, gix-shallow v0.10.0, gix-transport v0.55.1, gix-protocol v0.59.0, gix-status v0.28.0, gix-submodule v0.28.0, gix-worktree-state v0.28.0, gix v0.81.0, gix-fsck v0.19.0, gitoxide-core v0.55.0, gitoxide v0.52.0, safety bump 31 crates ([`c389a2c`](https://github.com/GitoxideLabs/gitoxide/commit/c389a2ccb32b36c1178a1352a2bb3229aef3b016))
+    - Merge pull request #2454 from GitoxideLabs/dependabot/cargo/cargo-da044b9bb0 ([`6183fd0`](https://github.com/GitoxideLabs/gitoxide/commit/6183fd092d7acd43763fe15be400ce81e7172775))
+    - Bump the cargo group with 68 updates ([`6bdb331`](https://github.com/GitoxideLabs/gitoxide/commit/6bdb33145e8aa81ba0dae5caafc675c591569715))
+    - Merge pull request #2441 from cruessler/remove-sha-1-from-default-features ([`e8bf096`](https://github.com/GitoxideLabs/gitoxide/commit/e8bf096c07205a41089a697a9726f075d3515643))
+    - Add `sha1` and `sha256` features to `gix`. ([`3832916`](https://github.com/GitoxideLabs/gitoxide/commit/383291689c659a2cc0bee7687f5a9b9f7a3659a4))
+    - Adapt to sha1 not being default feature of `gix-hash` ([`e71c703`](https://github.com/GitoxideLabs/gitoxide/commit/e71c703f0b8ca209f8aa912cbaf5aa26551496ef))
+    - Merge pull request #2445 from GitoxideLabs/improvements ([`6a7287c`](https://github.com/GitoxideLabs/gitoxide/commit/6a7287c9247120167e49154463f7e86c25100649))
+    - Add `cargo machete` CI job including exclusions ([`abd0724`](https://github.com/GitoxideLabs/gitoxide/commit/abd072444ff076557aa7e4c5b76ad7c47d488a4a))
+    - Merge pull request #2442 from GitoxideLabs/report ([`f7277f3`](https://github.com/GitoxideLabs/gitoxide/commit/f7277f3c9e3e5130edb714ff5bd3db06b7f589b3))
+</details>
+
 ## 0.53.0 (2026-02-22)
 
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release over the course of 10 calendar days.
+ - 2 commits contributed to the release over the course of 10 calendar days.
  - 12 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
@@ -23,6 +687,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release gix-error v0.2.0, gix-date v0.15.0, gix-actor v0.40.0, gix-object v0.57.0, gix-quote v0.7.0, gix-attributes v0.31.0, gix-command v0.8.0, gix-filter v0.27.0, gix-chunk v0.7.0, gix-commitgraph v0.34.0, gix-revwalk v0.28.0, gix-traverse v0.54.0, gix-worktree-stream v0.29.0, gix-archive v0.29.0, gix-bitmap v0.3.0, gix-index v0.48.0, gix-pathspec v0.16.0, gix-worktree v0.49.0, gix-diff v0.60.0, gix-blame v0.10.0, gix-ref v0.60.0, gix-config v0.53.0, gix-prompt v0.14.0, gix-url v0.35.2, gix-credentials v0.37.0, gix-discover v0.48.0, gix-dir v0.22.0, gix-mailmap v0.32.0, gix-revision v0.42.0, gix-merge v0.13.0, gix-negotiate v0.28.0, gix-pack v0.67.0, gix-odb v0.77.0, gix-refspec v0.38.0, gix-shallow v0.9.0, gix-transport v0.55.0, gix-protocol v0.58.0, gix-status v0.27.0, gix-submodule v0.27.0, gix-worktree-state v0.27.0, gix v0.80.0, gix-fsck v0.18.0, gitoxide-core v0.54.0, gitoxide v0.51.0, safety bump 42 crates ([`ecf90fc`](https://github.com/GitoxideLabs/gitoxide/commit/ecf90fccb9d43bff320c17f46fdc3f5832533a52))
     - Merge branch 'release' ([`9327b73`](https://github.com/GitoxideLabs/gitoxide/commit/9327b73785227f1322a327cb48fbb0800e1286ae))
 </details>
 
@@ -57,7 +722,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 6 commits contributed to the release over the course of 21 calendar days.
- - 21 days passed between releases.
+ - 22 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#2363](https://github.com/GitoxideLabs/gitoxide/issues/2363)
 
@@ -106,7 +771,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 5 commits contributed to the release.
- - 29 days passed between releases.
+ - 30 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -131,6 +796,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <csr-read-only-do-not-edit/>
 
  - 2 commits contributed to the release.
+ - 30 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -148,13 +814,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.47.1 (2025-10-23)
 
 <csr-id-6f469a6fea59c88e6c69a5f94b0bc8a5977cb75b/>
-
-### Other
-
- - <csr-id-6f469a6fea59c88e6c69a5f94b0bc8a5977cb75b/> Remove `doc_auto_cfg` feature to fix docs.rs documentation.
-   It is part of `doc_cfg` feature since https://github.com/rust-lang/rust/pull/138907
-   
-   This fixes the docs.rs build
 
 ### Commit Statistics
 
@@ -229,7 +888,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 15 commits contributed to the release over the course of 79 calendar days.
- - 79 days passed between releases.
+ - 80 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -270,6 +929,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -298,6 +958,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 18 commits contributed to the release.
+ - 21 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -348,6 +1009,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 15 commits contributed to the release.
+ - 76 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#1826](https://github.com/GitoxideLabs/gitoxide/issues/1826)
 
@@ -386,12 +1048,6 @@ A maintenance release without user-facing changes.
 
 <csr-id-17835bccb066bbc47cc137e8ec5d9fe7d5665af0/>
 
-### Chore
-
- - <csr-id-17835bccb066bbc47cc137e8ec5d9fe7d5665af0/> bump `rust-version` to 1.70
-   That way clippy will allow to use the fantastic `Option::is_some_and()`
-   and friends.
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
@@ -426,6 +1082,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 12 commits contributed to the release.
+ - 33 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -459,41 +1116,6 @@ A maintenance release without user-facing changes.
  - <csr-id-cdac4a9b04959b0fc71009b5c828cdcb10a38828/> remove workspace lints from Cargo manifests of fuzz-projects.
    They are not part of the parent workspace.
 
-### Other
-
- - <csr-id-64ff0a77062d35add1a2dd422bb61075647d1a36/> Update gitoxide repository URLs
-   This updates `Byron/gitoxide` URLs to `GitoxideLabs/gitoxide` in:
-   
-   - Markdown documentation, except changelogs and other such files
-     where such changes should not be made.
-   
-   - Documentation comments (in .rs files).
-   
-   - Manifest (.toml) files, for the value of the `repository` key.
-   
-   - The comments appearing at the top of a sample hook that contains
-     a repository URL as an example.
-   
-   When making these changes, I also allowed my editor to remove
-   trailing whitespace in any lines in files already being edited
-   (since, in this case, there was no disadvantage to allowing this).
-   
-   The gitoxide repository URL changed when the repository was moved
-   into the recently created GitHub organization `GitoxideLabs`, as
-   detailed in #1406. Please note that, although I believe updating
-   the URLs to their new canonical values is useful, this is not
-   needed to fix any broken links, since `Byron/gitoxide` URLs
-   redirect (and hopefully will always redirect) to the coresponding
-   `GitoxideLabs/gitoxide` URLs.
-   
-   While this change should not break any URLs, some affected URLs
-   were already broken. This updates them, but they are still broken.
-   They will be fixed in a subsequent commit.
-   
-   This also does not update `Byron/gitoxide` URLs in test fixtures
-   or test cases, nor in the `Makefile`. (It may make sense to change
-   some of those too, but it is not really a documentation change.)
-
 ### Bug Fixes (BREAKING)
 
  - <csr-id-9c619e48db145928ff6ac420d6bb3d79deefc9f8/> make all filter arguments non-dyn.
@@ -515,7 +1137,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 22 commits contributed to the release over the course of 60 calendar days.
- - 60 days passed between releases.
+ - 61 days passed between releases.
  - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -702,7 +1324,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 6 commits contributed to the release over the course of 8 calendar days.
- - 38 days passed between releases.
+ - 39 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -733,6 +1355,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 10 commits contributed to the release over the course of 9 calendar days.
+ - 30 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -878,7 +1501,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 12 commits contributed to the release.
- - 20 days passed between releases.
+ - 21 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -907,20 +1530,12 @@ A maintenance release without user-facing changes.
 
 <csr-id-3bd09ef120945a9669321ea856db4079a5dab930/>
 
-### Chore
-
-- <csr-id-3bd09ef120945a9669321ea856db4079a5dab930/> change `rust-version` manifest field back to 1.65.
-  They didn't actually need to be higher to work, and changing them
-  unecessarily can break downstream CI.
-
-  Let's keep this value as low as possible, and only increase it when
-  more recent features are actually used.
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 5 commits contributed to the release.
+ - 1 day passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -944,11 +1559,6 @@ A maintenance release without user-facing changes.
 <csr-id-14460020ff5f5c6f1d5c4089d35d7d6932604d14/>
 <csr-id-ebc051c1d470bbb063deb9ff57ba058b93f1e8a3/>
 
-### Chore
-
-- <csr-id-aea89c3ad52f1a800abb620e9a4701bdf904ff7d/> upgrade MSRV to v1.70
-  Our MSRV follows the one of `helix`, which in turn follows Firefox.
-
 ### New Features
 
  - <csr-id-8053710e2940ced8ab8a7805de3bb94408352a9e/> Fuzz more of the gix-config api
@@ -958,11 +1568,6 @@ A maintenance release without user-facing changes.
  - <csr-id-1fe600e72911c2f27b20be312b2e805451e7d58c/> assure that `GIT_CONFIG_NOSYTEM` is treated as boolean.
    That way, it can also be deactivated, which is exactly what `git`
    does.
-
-### Other
-
-- <csr-id-14460020ff5f5c6f1d5c4089d35d7d6932604d14/> Add a fuzz harness for File
-- <csr-id-ebc051c1d470bbb063deb9ff57ba058b93f1e8a3/> Add fuzzer for file::Section
 
 ### Commit Statistics
 
@@ -1028,6 +1633,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1052,6 +1658,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 8 commits contributed to the release.
+ - 55 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1081,7 +1688,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release over the course of 6 calendar days.
- - 17 days passed between releases.
+ - 18 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1106,15 +1713,6 @@ A maintenance release without user-facing changes.
 ## 0.30.0 (2023-09-24)
 
 <csr-id-db0c4017142fd25d26d1c6860972b1ac84b24a6e/>
-
-### Chore
-
-- <csr-id-db0c4017142fd25d26d1c6860972b1ac84b24a6e/> add more test cases to pin behaviour around string and path handling.
-  This is important to know how to consistently handle empty strings - should they
-  not be present? Or should they be flagged as error?
-
-  The answer here is that the caller has to deal with it, as we report these values
-  if they are present which only requires an equals sign.
 
 ### Commit Statistics
 
@@ -1186,12 +1784,6 @@ A maintenance release without user-facing changes.
 
 <csr-id-ef54aab9e5521add4154ee8d902d62612a9d8d4a/>
 
-### Chore
-
-- <csr-id-ef54aab9e5521add4154ee8d902d62612a9d8d4a/> switch `nom` to `winnow` in remaining uses in `gix-object`, `gix-ref`, and `gix-actor` for ~20% more performance.
-  It's likely that over time, these parsers will get even faster due to improvements to `winnow`.
-  Thanks, Ed Page, for single-handedly performing this transition.
-
 ### Bug Fixes
 
  - <csr-id-c51c8daee1ab54130ae3ed83ce67d08f01c4881a/> fix incorrect s/git-config/gix-config/
@@ -1249,7 +1841,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 6 commits contributed to the release over the course of 3 calendar days.
- - 4 days passed between releases.
+ - 5 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1277,7 +1869,7 @@ The parsing switches from `nom` to `winnow`, which eases maintenance and improve
 <csr-read-only-do-not-edit/>
 
  - 28 commits contributed to the release.
- - 10 days passed between releases.
+ - 11 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1351,7 +1943,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 4 commits contributed to the release over the course of 4 calendar days.
- - 19 days passed between releases.
+ - 20 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1407,7 +1999,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release over the course of 6 calendar days.
- - 6 days passed between releases.
+ - 7 days passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1427,16 +2019,12 @@ A maintenance release without user-facing changes.
 
 <csr-id-bcad5c22049d56a25ef69d6c7a3344e78f9a1d4d/>
 
-### Chore
-
-- <csr-id-bcad5c22049d56a25ef69d6c7a3344e78f9a1d4d/> Add `clippy::redundant-closure-for-method-calls` lint
-
 ### Commit Statistics
 
 <csr-read-only-do-not-edit/>
 
  - 6 commits contributed to the release over the course of 10 calendar days.
- - 15 days passed between releases.
+ - 16 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1458,10 +2046,6 @@ A maintenance release without user-facing changes.
 ## 0.23.0 (2023-06-06)
 
 <csr-id-dbc6cbb4363c2532f81b0bd6e351c4577bb9e9a3/>
-
-### Chore
-
-- <csr-id-dbc6cbb4363c2532f81b0bd6e351c4577bb9e9a3/> inline format args
 
 ### Commit Statistics
 
@@ -1500,6 +2084,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1629,6 +2214,7 @@ A maintenance release without user-facing changes.
 <csr-read-only-do-not-edit/>
 
  - 8 commits contributed to the release.
+ - 16 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#790](https://github.com/GitoxideLabs/gitoxide/issues/790)
 
@@ -1736,6 +2322,7 @@ A maintenance release to restore MSRV (1.64) support.
 <csr-read-only-do-not-edit/>
 
  - 3 commits contributed to the release.
+ - 1 day passed between releases.
  - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -1753,28 +2340,8 @@ A maintenance release to restore MSRV (1.64) support.
 
 ## 0.16.2 (2023-02-20)
 
-### New Features
-
- - <csr-id-4b424ab73d20833deb0c674eeeeaaa8cc2358932/> add `File::write_to_filter()` to have a filter select the section to write.
-   This way, one can selectively write sections to a file, based on the section's origin
-   or other meta-data.
-   
-   For convenience sake, most mutating methods on `SectionMut` can now be chained as well.
- - <csr-id-3fa86e1d01a75688cd8948a39ba415bcebfef02d/> add `File::set_meta()` to affect what metadata new sections receive.
-   That way it's possible to better control the metadata associated with new sections,
-   given that the config file metadata may not truly reflect its identity anymore since it
-   can be a combination from many different files with various sources.
-
 ### Bug Fixes
 
- - <csr-id-e14dc7d475373d2c266e84ff8f1826c68a34ab92/> note that crates have been renamed from `git-*` to `gix-*`.
-   This also means that the `git-*` prefixed crates of the `gitoxide` project
-   are effectively unmaintained.
-   Use the crates with the `gix-*` prefix instead.
-   
-   If you were using `git-repository`, then `gix` is its substitute.
- - <csr-id-8836f5ada0078febf8aeb0e6b59d0fc4c588bc28/> `File::section(...)` could panic due to invlid expectation.
-   This has been fixed to prevent panics.
  - <csr-id-135d317065aae87af302beb6c26bb6ca8e30b6aa/> compatibility with `bstr` v1.3, use `*.as_bytes()` instead of `.as_ref()`.
    `as_ref()` relies on a known target type which isn't always present. However, once
    there is only one implementation, that's no problem, but when that changes compilation
@@ -1815,16 +2382,6 @@ A maintenance release to restore MSRV (1.64) support.
 <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/>
 
 A maintenance release without user-facing changes.
-
-### Other (BREAKING)
-
-- <csr-id-69ec5940d3f37eb4dace8f1ed7616b5988984d15/> `File::set_raw_[multi_]value()` to `::set_existing_raw_[multi_]value`.
-  This makes clear that the method will fail if the value doesn't yet
-  exist.
-- <csr-id-9cd99337333f5ef4b30e0ec9461fc087699576e6/> `File::raw_multi_value()` to `File::raw_values()`
-- <csr-id-0076dcf9b37f1d633bdad5573b40d34a9fbaba90/> `File::raw_multi_value_mut()` to `File::raw_values_mut()`
-- <csr-id-a8604a237782f8d60a185d4730db57bad81424a6/> `File::multi_value()` to `File::values()`.
-  The latter is better in line with `string()/strings()`
 
 ### Bug Fixes (BREAKING)
 
@@ -2027,23 +2584,6 @@ A maintenance release without user-facing changes.
    `GitConfigError` while getting closer to naming conventions in other
    `gitoxide` crates.
 
-### Refactor
-
-- <csr-id-55c00d880535a1f8c37cb7d4405d39ff5a7654a0/> remove `git_config::values::Value`; use `Bytes` in its place.
-
-### Other
-
-- <csr-id-32d5b3c695d868ba93755123a25b276bfbe55e0a/> :Events::from_bytes()` with `filter` support.
-- <csr-id-949622e461eb2116393ec6f4633ec0cb2e1695b5/> Include benches in crate to allow publishing to work
-- <csr-id-bcacfc9bcf19a0339541b24e84de68d95291c62b/> remove clippy-cargo lint until there are no warnings
-  Please feel free to re-add once all other git-* crates have been
-  adjusted. It's interesting to see how a crate lint spills into the
-  workspace.
-
-  Personally I am surprised that the keywords value is supposed
-  to repeat the crate name as it seems redundant.
-- <csr-id-41f118d2aa560188fd3399d2390aa43794b0af75/> remove redundant lines from git-ignore file
-
 ### Bug Fixes
 
  - <csr-id-8836f5ada0078febf8aeb0e6b59d0fc4c588bc28/> `File::section(...)` could panic due to invlid expectation.
@@ -2222,10 +2762,6 @@ A maintenance release without user-facing changes.
 ### Documentation
 
  - <csr-id-39ed9eda62b7718d5109135e5ad406fb1fe2978c/> fix typos
-
-### Chore
-
-- <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
 
 ### Changed
 
@@ -3383,7 +3919,7 @@ Maintenance release without user-facing changes.
 
 ### Chore
 
-- <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
+ - <csr-id-f7f136dbe4f86e7dee1d54835c420ec07c96cd78/> uniformize deny attributes
 
 ### New Features
 
@@ -3417,9 +3953,9 @@ Maintenance release without user-facing changes.
 
 ### Other (BREAKING)
 
-- <csr-id-69ec5940d3f37eb4dace8f1ed7616b5988984d15/> `File::set_raw_[multi_]value()` to `::set_existing_raw_[multi_]value`.
-  This makes clear that the method will fail if the value doesn't yet
-  exist.
+ - <csr-id-69ec5940d3f37eb4dace8f1ed7616b5988984d15/> `File::set_raw_[multi_]value()` to `::set_existing_raw_[multi_]value`.
+   This makes clear that the method will fail if the value doesn't yet
+   exist.
 
 ## 0.6.1 (2022-08-17)
 
@@ -3499,7 +4035,7 @@ A maintenance release without user facing changes.
 
 ### Other
 
-- <csr-id-32d5b3c695d868ba93755123a25b276bfbe55e0a/> :Events::from_bytes()` with `filter` support.
+ - <csr-id-32d5b3c695d868ba93755123a25b276bfbe55e0a/> :Events::from_bytes()` with `filter` support.
 
 ### Changed (BREAKING)
 
@@ -3640,10 +4176,10 @@ A maintenance release without user facing changes.
 
 ### Other (BREAKING)
 
-- <csr-id-9cd99337333f5ef4b30e0ec9461fc087699576e6/> `File::raw_multi_value()` to `File::raw_values()`
-- <csr-id-0076dcf9b37f1d633bdad5573b40d34a9fbaba90/> `File::raw_multi_value_mut()` to `File::raw_values_mut()`
-- <csr-id-a8604a237782f8d60a185d4730db57bad81424a6/> `File::multi_value()` to `File::values()`.
-  The latter is better in line with `string()/strings()`
+ - <csr-id-9cd99337333f5ef4b30e0ec9461fc087699576e6/> `File::raw_multi_value()` to `File::raw_values()`
+ - <csr-id-0076dcf9b37f1d633bdad5573b40d34a9fbaba90/> `File::raw_multi_value_mut()` to `File::raw_values_mut()`
+ - <csr-id-a8604a237782f8d60a185d4730db57bad81424a6/> `File::multi_value()` to `File::values()`.
+   The latter is better in line with `string()/strings()`
 
 ## 0.5.0 (2022-06-13)
 
@@ -3743,7 +4279,7 @@ A maintenance release without user facing changes.
 
 ### Refactor
 
-- <csr-id-55c00d880535a1f8c37cb7d4405d39ff5a7654a0/> remove `gix_config::values::Value`; use `Bytes` in its place.
+ - <csr-id-55c00d880535a1f8c37cb7d4405d39ff5a7654a0/> remove `gix_config::values::Value`; use `Bytes` in its place.
 
 ## 0.1.11 (2022-01-31)
 
@@ -4484,6 +5020,11 @@ This is a maintenance release without functional changes.
   `ParserFromIoError`
 
 <csr-unknown>
+<csr-unknown>
+<csr-unknown>
+<csr-unknown>
+<csr-unknown>
+<csr-unknown>
 lenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopen<csr-unknown>
 lenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopen<csr-unknown>
 lenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopen<csr-unknown>
@@ -4519,6 +5060,11 @@ lenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfr
 <csr-unknown/>
 <csr-unknown/>
 <csr-unknown/>
+<csr-unknown/>
+<csr-unknown/>
+<csr-unknown/>
+<csr-unknown/>
+<csr-unknown/>
 
 ## v0.1.1 (2021-05-09)
 
@@ -4530,15 +5076,15 @@ lenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfrom_envopenlenfr
 
 ### Other
 
-- <csr-id-949622e461eb2116393ec6f4633ec0cb2e1695b5/> Include benches in crate to allow publishing to work
-- <csr-id-bcacfc9bcf19a0339541b24e84de68d95291c62b/> remove clippy-cargo lint until there are no warnings
-  Please feel free to re-add once all other git-* crates have been
-  adjusted. It's interesting to see how a crate lint spills into the
-  workspace.
-
-  Personally I am surprised that the keywords value is supposed
-  to repeat the crate name as it seems redundant.
-- <csr-id-41f118d2aa560188fd3399d2390aa43794b0af75/> remove redundant lines from git-ignore file
+ - <csr-id-949622e461eb2116393ec6f4633ec0cb2e1695b5/> Include benches in crate to allow publishing to work
+ - <csr-id-bcacfc9bcf19a0339541b24e84de68d95291c62b/> remove clippy-cargo lint until there are no warnings
+   Please feel free to re-add once all other git-* crates have been
+   adjusted. It's interesting to see how a crate lint spills into the
+   workspace.
+   
+   Personally I am surprised that the keywords value is supposed
+   to repeat the crate name as it seems redundant.
+ - <csr-id-41f118d2aa560188fd3399d2390aa43794b0af75/> remove redundant lines from git-ignore file
 
 ## v0.0.0 (2020-10-05)
 

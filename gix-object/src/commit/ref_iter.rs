@@ -1,12 +1,15 @@
+use gix_error::{OptionExt, Result};
 use std::{borrow::Cow, ops::Range};
 
 use bstr::BStr;
-use gix_hash::{oid, ObjectId};
+use gix_hash::{ObjectId, oid};
 
 use crate::{
+    CommitRefIter,
     bstr::ByteSlice,
-    commit::{decode, SignedData, SIGNATURE_FIELD_NAME},
-    parse, CommitRefIter,
+    commit::{decode, signature_field_name},
+    parse,
+    signature::SignedData,
 };
 
 #[derive(Copy, Clone)]
@@ -30,7 +33,7 @@ pub(crate) enum State {
 
 /// Lifecycle
 impl<'a> CommitRefIter<'a> {
-    /// Create a commit iterator from the given `data`, using `hash_kind` to know
+    /// Create a commit iterator from the given `data`, using `object_hash` to know
     /// what kind of hash to expect for validation.
     pub fn from_bytes(data: &'a [u8], hash_kind: gix_hash::Kind) -> CommitRefIter<'a> {
         CommitRefIter {
@@ -44,14 +47,11 @@ impl<'a> CommitRefIter<'a> {
 /// Access
 impl<'a> CommitRefIter<'a> {
     /// Parse `data` as commit and return its PGP signature, along with *all non-signature* data as [`SignedData`], or `None`
-    /// if the commit isn't signed. All hashes in `data` are parsed as `hash_kind`.
+    /// if the commit isn't signed. All hashes in `data` are parsed as `object_hash`.
     ///
     /// This allows the caller to validate the signature by passing the signed data along with the signature back to the program
     /// that created it.
-    pub fn signature(
-        data: &'a [u8],
-        hash_kind: gix_hash::Kind,
-    ) -> Result<Option<(Cow<'a, BStr>, SignedData<'a>)>, crate::decode::Error> {
+    pub fn signature(data: &'a [u8], hash_kind: gix_hash::Kind) -> Result<Option<(Cow<'a, BStr>, SignedData<'a>)>> {
         let mut signature_and_range = None;
 
         let raw_tokens = CommitRefIterRaw {
@@ -62,17 +62,17 @@ impl<'a> CommitRefIter<'a> {
         };
         for token in raw_tokens {
             let token = token?;
-            if let Token::ExtraHeader((name, value)) = &token.token {
-                if *name == SIGNATURE_FIELD_NAME {
-                    // keep track of the signature range alongside the signature data,
-                    // because all but the signature is the signed data.
-                    signature_and_range = Some((value.clone(), token.token_range));
-                    break;
-                }
+            if let Token::ExtraHeader((name, value)) = &token.token
+                && *name == signature_field_name(hash_kind)
+            {
+                // keep track of the signature range alongside the signature data,
+                // because all but the signature is the signed data.
+                signature_and_range = Some((value.clone(), token.token_range));
+                break;
             }
         }
 
-        Ok(signature_and_range.map(|(sig, signature_range)| (sig, SignedData { data, signature_range })))
+        Ok(signature_and_range.map(|(sig, signature_range)| (sig, SignedData::new(data, signature_range))))
     }
 
     /// Returns the object id of this commits tree if it is the first function called and if there is no error in decoding
@@ -82,9 +82,9 @@ impl<'a> CommitRefIter<'a> {
     /// Errors are coerced into options, hiding whether there was an error or not. The caller should assume an error if they
     /// call the method as intended. Such a squelched error cannot be recovered unless the objects data is retrieved and parsed again.
     /// `next()`.
-    pub fn tree_id(&mut self) -> Result<ObjectId, crate::decode::Error> {
-        let tree_id = self.next().ok_or_else(missing_field)??;
-        Token::try_into_id(tree_id).ok_or_else(missing_field)
+    pub fn tree_id(&mut self) -> Result<ObjectId> {
+        let tree_id = self.next().ok_or_raise(missing_field)??;
+        Token::try_into_id(tree_id).ok_or_raise(missing_field)
     }
 
     /// Return all `parent_ids` as iterator.
@@ -110,32 +110,32 @@ impl<'a> CommitRefIter<'a> {
     }
 
     /// Returns the committer signature if there is no decoding error.
-    pub fn committer(mut self) -> Result<gix_actor::SignatureRef<'a>, crate::decode::Error> {
+    pub fn committer(mut self) -> Result<gix_actor::SignatureRef<'a>> {
         self.find_map(|t| match t {
             Ok(Token::Committer { signature }) => Some(Ok(signature)),
             Err(err) => Some(Err(err)),
             _ => None,
         })
-        .ok_or_else(missing_field)?
+        .ok_or_raise(missing_field)?
     }
 
     /// Returns the author signature if there is no decoding error.
     ///
     /// It may contain white space surrounding it, and is exactly as parsed.
-    pub fn author(mut self) -> Result<gix_actor::SignatureRef<'a>, crate::decode::Error> {
+    pub fn author(mut self) -> Result<gix_actor::SignatureRef<'a>> {
         self.find_map(|t| match t {
             Ok(Token::Author { signature }) => Some(Ok(signature)),
             Err(err) => Some(Err(err)),
             _ => None,
         })
-        .ok_or_else(missing_field)?
+        .ok_or_raise(missing_field)?
     }
 
     /// Returns the message if there is no decoding error.
     ///
     /// It may contain white space surrounding it, and is exactly as
     //  parsed.
-    pub fn message(mut self) -> Result<&'a BStr, crate::decode::Error> {
+    pub fn message(mut self) -> Result<&'a BStr> {
         self.find_map(|t| match t {
             Ok(Token::Message(msg)) => Some(Ok(msg)),
             Err(err) => Some(Err(err)),
@@ -146,17 +146,13 @@ impl<'a> CommitRefIter<'a> {
     }
 }
 
-fn missing_field() -> crate::decode::Error {
+fn missing_field() -> gix_error::Message {
     crate::decode::empty_error()
 }
 
 impl<'a> CommitRefIter<'a> {
     #[inline]
-    fn next_inner(
-        mut i: &'a [u8],
-        state: &mut State,
-        hash_kind: gix_hash::Kind,
-    ) -> Result<(&'a [u8], Token<'a>), crate::decode::Error> {
+    fn next_inner(mut i: &'a [u8], state: &mut State, hash_kind: gix_hash::Kind) -> Result<(&'a [u8], Token<'a>)> {
         let input = &mut i;
         match Self::next_inner_(input, state, hash_kind) {
             Ok(token) => Ok((*input, token)),
@@ -164,11 +160,7 @@ impl<'a> CommitRefIter<'a> {
         }
     }
 
-    fn next_inner_(
-        input: &mut &'a [u8],
-        state: &mut State,
-        hash_kind: gix_hash::Kind,
-    ) -> Result<Token<'a>, crate::decode::Error> {
+    fn next_inner_(input: &mut &'a [u8], state: &mut State, hash_kind: gix_hash::Kind) -> Result<Token<'a>> {
         use State::*;
         Ok(match state {
             Tree => {
@@ -191,7 +183,7 @@ impl<'a> CommitRefIter<'a> {
                     Self::next_inner_(input, state, hash_kind)?
                 }
             }
-            Signature { ref mut of } => {
+            Signature { of } => {
                 let who = *of;
                 let field_name = match of {
                     SignatureKind::Author => {
@@ -224,14 +216,14 @@ impl<'a> CommitRefIter<'a> {
                     Self::next_inner_(input, state, hash_kind)?
                 } else {
                     let before = *input;
-                    match parse::any_header_field_multi_line(input)
-                        .map(|(k, o)| (k.as_bstr(), Cow::Owned(o)))
-                        .or_else(|_| {
-                            *input = before;
-                            parse::any_header_field(input).map(|(k, o)| (k.as_bstr(), Cow::Borrowed(o.as_bstr())))
-                        }) {
-                        Ok(extra_header) => Token::ExtraHeader(extra_header),
-                        Err(err) => return Err(err),
+                    {
+                        let extra_header = parse::any_header_field_multi_line(input)
+                            .map(|(k, o)| (k.as_bstr(), Cow::Owned(o)))
+                            .or_else(|_| {
+                                *input = before;
+                                parse::any_header_field(input).map(|(k, o)| (k.as_bstr(), Cow::Borrowed(o.as_bstr())))
+                            })?;
+                        Token::ExtraHeader(extra_header)
                     }
                 }
             }
@@ -248,7 +240,7 @@ impl<'a> CommitRefIter<'a> {
 }
 
 impl<'a> Iterator for CommitRefIter<'a> {
-    type Item = Result<Token<'a>, crate::decode::Error>;
+    type Item = Result<Token<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.data.is_empty() {
@@ -276,7 +268,7 @@ struct CommitRefIterRaw<'a> {
 }
 
 impl<'a> Iterator for CommitRefIterRaw<'a> {
-    type Item = Result<RawToken<'a>, crate::decode::Error>;
+    type Item = Result<RawToken<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.data.is_empty() {
@@ -311,7 +303,7 @@ struct RawToken<'a> {
 }
 
 /// A token returned by the [commit iterator][CommitRefIter].
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 pub enum Token<'a> {
     Tree {

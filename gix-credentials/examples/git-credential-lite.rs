@@ -1,9 +1,11 @@
+use gix_error::Result;
 /// Run like this `echo url=https://example.com | cargo run --example git-credential-light -- fill`
-pub fn main() -> Result<(), gix_credentials::program::main::Error> {
+pub fn main() -> Result {
     gix_credentials::program::main(
         std::env::args_os().skip(1),
         std::io::stdin(),
         std::io::stdout(),
+        gix_credentials::protocol::ContextOptions::default(),
         |action, context| {
             use gix_credentials::program::main::Action::*;
             gix_credentials::helper::Cascade::default()

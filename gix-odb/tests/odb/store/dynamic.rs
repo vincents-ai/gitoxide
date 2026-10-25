@@ -1,11 +1,16 @@
-use std::process::Command;
-
+use crate::Result;
 use gix_hash::ObjectId;
 use gix_object::{Exists, FindExt, Write};
-use gix_odb::{store, store::iter::Ordering, Header};
-use gix_testtools::fixture_path_standalone;
+use gix_odb::{Header, store, store::iter::Ordering};
+use gix_testtools::fixture_path;
 
-use crate::{hex_to_id, odb::db};
+use crate::{db, hex_to_id, hex_to_id_for_hash, odb_at};
+
+/// A syntactically valid object id matching the handle's own hash length, all bytes `0xaa`.
+fn missing_id(handle: &gix_odb::Handle) -> ObjectId {
+    ObjectId::from_hex("a".repeat(handle.store_ref().object_hash().len_in_hex()).as_bytes())
+        .expect("valid hex of the store's hash length")
+}
 
 fn all_orderings() -> [Ordering; 2] {
     [
@@ -14,10 +19,38 @@ fn all_orderings() -> [Ordering; 2] {
     ]
 }
 
+#[derive(Debug, Copy, Clone)]
+struct PackMetrics {
+    objects: usize,
+    packs: usize,
+}
+
+fn expected_pack_metrics(repo_dir: &std::path::Path) -> Result<PackMetrics> {
+    let expected = std::fs::read_to_string(repo_dir.join("expected-count-objects"))?;
+    let mut loose = None;
+    let mut in_pack = None;
+    let mut packs = None;
+
+    for line in expected.lines() {
+        if let Some(value) = line.strip_prefix("count: ") {
+            loose = Some(value.parse::<usize>()?);
+        } else if let Some(value) = line.strip_prefix("in-pack: ") {
+            in_pack = Some(value.parse::<usize>()?);
+        } else if let Some(value) = line.strip_prefix("packs: ") {
+            packs = Some(value.parse::<usize>()?);
+        }
+    }
+
+    Ok(PackMetrics {
+        objects: loose.expect("count field") + in_pack.expect("in-pack field"),
+        packs: packs.expect("packs field"),
+    })
+}
+
 /// indices, multi-pack-index, loose odb
-fn db_with_all_object_sources() -> crate::Result<(gix_odb::Handle, gix_testtools::tempfile::TempDir)> {
+fn db_with_all_object_sources() -> Result<(gix_odb::Handle, gix_testtools::tempfile::TempDir)> {
     let objects_dir = gix_testtools::tempfile::tempdir()?;
-    gix_testtools::copy_recursively_into_existing_dir(fixture_path_standalone("objects"), &objects_dir)?;
+    gix_testtools::copy_recursively_into_existing_dir(fixture_path("objects"), &objects_dir)?;
 
     let mut multi_pack_index = std::fs::OpenOptions::new()
         .write(true)
@@ -25,23 +58,24 @@ fn db_with_all_object_sources() -> crate::Result<(gix_odb::Handle, gix_testtools
         .open(objects_dir.path().join("pack/multi-pack-index"))?;
     gix_odb::pack::multi_index::write_from_index_paths(
         vec![
-            fixture_path_standalone("objects/pack/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.idx"),
-            fixture_path_standalone("objects/pack/pack-c0438c19fb16422b6bbcce24387b3264416d485b.idx"),
+            fixture_path("objects/pack/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.idx"),
+            fixture_path("objects/pack/pack-c0438c19fb16422b6bbcce24387b3264416d485b.idx"),
         ],
         &mut multi_pack_index,
-        &mut gix_features::progress::Discard,
+        &mut gix_utils::progress::Discard,
         &std::sync::atomic::AtomicBool::default(),
         gix_odb::pack::multi_index::write::Options {
             object_hash: gix_hash::Kind::Sha1,
         },
     )?;
-    Ok((gix_odb::at(objects_dir.path())?, objects_dir))
+    Ok((gix_odb::at(objects_dir.path(), gix_hash::Kind::Sha1)?, objects_dir))
 }
 
 #[test]
-fn multi_index_access() -> crate::Result {
-    let dir = gix_testtools::scripted_fixture_writable_standalone("make_repo_multi_index.sh")?;
-    let handle = gix_odb::at(dir.path().join(".git/objects"))?;
+fn multi_index_access() -> gix_testtools::TestResult {
+    let dir = crate::scripted_fixture_writable("make_repo_multi_index.sh")?;
+    let expected = expected_pack_metrics(dir.path())?;
+    let handle = crate::odb_at(dir.path().join(".git/objects"))?;
 
     assert_eq!(
         handle.store_ref().metrics(),
@@ -72,7 +106,7 @@ fn multi_index_access() -> crate::Result {
             assert_eq!(hdr.size(), obj.data.len() as u64);
             count += 1;
         }
-        assert_eq!(count, 1732);
+        assert_eq!(count, expected.objects);
     }
 
     assert_eq!(
@@ -82,8 +116,8 @@ fn multi_index_access() -> crate::Result {
             num_refreshes: 1,
             open_reachable_indices: 1,
             known_reachable_indices: 1,
-            open_reachable_packs: 15,
-            known_packs: 15,
+            open_reachable_packs: expected.packs,
+            known_packs: expected.packs,
             unused_slots: 31,
             loose_dbs: 1,
             unreachable_indices: 0,
@@ -92,7 +126,7 @@ fn multi_index_access() -> crate::Result {
         "it opened only a single multi-index and its pack - hard to see it's actually a multi-index as it's just one index anyway…"
     );
 
-    let non_existing_to_trigger_refresh = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let non_existing_to_trigger_refresh = missing_id(&handle);
     handle.exists(&non_existing_to_trigger_refresh);
 
     assert_eq!(
@@ -102,8 +136,8 @@ fn multi_index_access() -> crate::Result {
             num_refreshes: 2,
             open_reachable_indices: 1,
             known_reachable_indices: 1,
-            open_reachable_packs: 15,
-            known_packs: 15,
+            open_reachable_packs: expected.packs,
+            known_packs: expected.packs,
             unused_slots: 31,
             loose_dbs: 1,
             unreachable_indices: 0,
@@ -122,11 +156,11 @@ fn multi_index_access() -> crate::Result {
         handle.store_ref().metrics(),
         gix_odb::store::Metrics {
             num_handles: 1,
-            num_refreshes: 2 + 1 /*legit refresh with changes*/ + 1 /*a refresh attempt with no changes, causing 'contains()' to give up*/,
+            num_refreshes: 2 + 1 /*legit refresh with changes*/ + 1, /*a refresh attempt with no changes, causing 'contains()' to give up*/
             open_reachable_indices: 1,
             known_reachable_indices: 1,
             open_reachable_packs: 0,
-            known_packs: 15,
+            known_packs: expected.packs,
             unused_slots: 31,
             loose_dbs: 1,
             unreachable_indices: 0,
@@ -145,10 +179,12 @@ fn multi_index_access() -> crate::Result {
 }
 
 #[test]
-fn multi_index_alloc_limit_bytes_falls_back_to_plain_indices() -> crate::Result {
-    let dir = gix_testtools::scripted_fixture_writable_standalone("make_repo_multi_index.sh")?;
+fn multi_index_alloc_limit_bytes_falls_back_to_plain_indices() -> gix_testtools::TestResult {
+    let dir = crate::scripted_fixture_writable("make_repo_multi_index.sh")?;
+    let expected = expected_pack_metrics(dir.path())?;
     let handle = gix_odb::at_opts(
         dir.path().join(".git/objects"),
+        gix_testtools::object_hash(),
         Vec::new(),
         gix_odb::store::init::Options {
             alloc_limit_bytes: Some(1),
@@ -163,7 +199,7 @@ fn multi_index_alloc_limit_bytes_falls_back_to_plain_indices() -> crate::Result 
     }
 
     assert_eq!(
-        count, 1732,
+        count, expected.objects,
         "packed objects remain reachable by falling back to plain indices"
     );
     let metrics = handle.store_ref().metrics();
@@ -171,15 +207,16 @@ fn multi_index_alloc_limit_bytes_falls_back_to_plain_indices() -> crate::Result 
         metrics.known_reachable_indices > 1,
         "a multi-index open blocked by the allocation limit must fall back to loading plain indices"
     );
-    assert_eq!(metrics.known_packs, 15);
+    assert_eq!(metrics.known_packs, expected.packs);
     Ok(())
 }
 
 #[test]
-fn multi_index_keep_open() -> crate::Result {
-    let dir = gix_testtools::scripted_fixture_writable_standalone("make_repo_multi_index.sh")?;
+fn multi_index_keep_open() -> gix_testtools::TestResult {
+    let dir = crate::scripted_fixture_writable("make_repo_multi_index.sh")?;
+    let expected = expected_pack_metrics(dir.path())?;
     let (stable_handle, handle) = {
-        let mut stable_handle = gix_odb::at(dir.path().join(".git/objects"))?;
+        let mut stable_handle = crate::odb_at(dir.path().join(".git/objects"))?;
         let handle = stable_handle.clone();
         stable_handle.prevent_pack_unload();
         (stable_handle, handle)
@@ -194,7 +231,7 @@ fn multi_index_keep_open() -> crate::Result {
             open_reachable_indices: 1,
             known_reachable_indices: 1,
             open_reachable_packs: 0,
-            known_packs: 15,
+            known_packs: expected.packs,
             unused_slots: 31,
             loose_dbs: 1,
             unreachable_indices: 0,
@@ -205,10 +242,10 @@ fn multi_index_keep_open() -> crate::Result {
     let mut buf = Vec::new();
     use gix_pack::Find;
     let location = stable_handle
-        .location_by_oid(&oid, &mut buf)
+        .location_by_oid(&oid, &mut buf)?
         .expect("oid exists and is packed");
 
-    let non_existing_to_trigger_refresh = hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let non_existing_to_trigger_refresh = missing_id(&handle);
     filetime::set_file_mtime(
         handle.store_ref().path().join("pack/multi-pack-index"),
         filetime::FileTime::now(),
@@ -223,7 +260,7 @@ fn multi_index_keep_open() -> crate::Result {
             open_reachable_indices: 1,
             known_reachable_indices: 1,
             open_reachable_packs: 0, /*no pack is open anymore at least as seen from the index*/
-            known_packs: 15,
+            known_packs: expected.packs,
             unused_slots: 30,
             loose_dbs: 1,
             unreachable_indices: 1,
@@ -241,21 +278,82 @@ fn multi_index_keep_open() -> crate::Result {
 }
 
 #[test]
-fn write() -> crate::Result {
-    let dir = gix_testtools::tempfile::tempdir()?;
-    let mut handle = gix_odb::at(dir.path())?;
-    // It should refresh once even if the refresh mode is never, just to initialize the index
-    handle.refresh_never();
+fn an_object_in_a_pack_moved_by_an_external_process_can_be_found_from_a_stale_handle() -> gix_testtools::TestResult {
+    let tmp = gix_testtools::tempfile::tempdir()?;
+    let pack_dir = tmp.path().join("objects/pack");
+    std::fs::create_dir_all(&pack_dir)?;
+    gix_testtools::copy_recursively_into_existing_dir(fixture_path("objects/pack"), &pack_dir)?;
 
-    let written_id = handle.write_buf(gix_object::Kind::Blob, b"hello world")?;
-    assert_eq!(written_id, hex_to_id("95d09f2b10159347eece71399a7e2e907ea3df4f"));
+    // Keep only the biggest pack visible so the first lookup captures exactly the index that will be moved,
+    // without opening its pack. Renaming the pair then models an external repack replacing an index in-place.
+    for name in [
+        "pack-11fdfa9e156ab73caae3b6da867192221f2089c2",
+        "pack-a2bf8e71d8c18879e499335762dd95119d93d9f1",
+    ] {
+        let stem = pack_dir.join(name);
+        std::fs::rename(
+            stem.with_extension("idx"),
+            stem.with_extension("idx.permanently-hidden"),
+        )?;
+        std::fs::rename(
+            stem.with_extension("pack"),
+            stem.with_extension("pack.permanently-hidden"),
+        )?;
+    }
+
+    let stale_handle = gix_odb::at(tmp.path().join("objects"), gix_hash::Kind::Sha1)?;
+    let id = hex_to_id("dd25c539efbb0ab018caa4cda2d133285634e9b5");
+    assert!(
+        stale_handle.exists(&id),
+        "the soon-to-be-stale handle records the original index without loading its pack"
+    );
+    assert_eq!(
+        stale_handle.store_ref().metrics().open_reachable_packs,
+        0,
+        "the pack must stay unloaded for load_pack() to exercise the cleared slot"
+    );
+    let refresh_handle = stale_handle.clone();
+
+    let original = pack_dir.join("pack-c0438c19fb16422b6bbcce24387b3264416d485b");
+    let moved = pack_dir.join("pack-moved-by-external-process");
+    std::fs::rename(original.with_extension("idx"), moved.with_extension("idx"))?;
+    std::fs::rename(original.with_extension("pack"), moved.with_extension("pack"))?;
+    assert!(
+        !refresh_handle.exists(&missing_id(&refresh_handle)),
+        "a miss refreshes the shared store after the pack pair moved"
+    );
+
+    let mut buf = Vec::new();
+    assert_eq!(
+        stale_handle.find(&id, &mut buf)?.kind,
+        gix_object::Kind::Blob,
+        "a stale pack id should trigger an index refresh and find the moved pack"
+    );
     Ok(())
 }
 
 #[test]
-fn alternate_dbs_query() -> crate::Result {
-    let dir = gix_testtools::scripted_fixture_read_only_standalone("make_alternates_odb.sh")?;
-    let handle = gix_odb::at(dir.join(".git/objects"))?;
+fn write() -> gix_testtools::TestResult {
+    let dir = gix_testtools::tempfile::tempdir()?;
+    let mut handle = odb_at(dir.path())?;
+    // It should refresh once even if the refresh mode is never, just to initialize the index
+    handle.refresh_never();
+
+    let written_id = handle.write_buf(gix_object::Kind::Blob, b"hello world")?;
+    assert_eq!(
+        written_id,
+        hex_to_id_for_hash(
+            "95d09f2b10159347eece71399a7e2e907ea3df4f",
+            "fee53a18d32820613c0527aa79be5cb30173c823a9b448fa4817767cc84c6f03"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn alternate_dbs_query() -> gix_testtools::TestResult {
+    let dir = crate::scripted_fixture_read_only("make_alternates_odb.sh")?;
+    let handle = crate::odb_at(dir.join(".git/objects"))?;
 
     let alternates = handle.store_ref().alternate_db_paths()?;
     assert_eq!(alternates.len(), 1, "exactly one alternate");
@@ -273,14 +371,20 @@ fn alternate_dbs_query() -> crate::Result {
 }
 
 #[test]
-fn object_replacement() -> crate::Result {
-    let dir = gix_testtools::scripted_fixture_read_only_standalone("make_replaced_history.sh")?;
-    let handle = gix_odb::at(dir.join(".git/objects"))?;
+fn object_replacement() -> gix_testtools::TestResult {
+    let dir = crate::scripted_fixture_read_only("make_replaced_history.sh")?;
+    let handle = crate::odb_at(dir.join(".git/objects"))?;
     let mut buf = Vec::new();
-    let short_history_link = hex_to_id("434e5a872d6738d1fffd1e11e52a1840b73668c6");
+    let short_history_link = hex_to_id_for_hash(
+        "434e5a872d6738d1fffd1e11e52a1840b73668c6",
+        "c179086705a0bde4427fdb3ba08e69a4adb63ed8a403693d87f38797004861de",
+    );
     let third_commit = handle.find_commit(&short_history_link, &mut buf)?;
 
-    let orphan_of_new_history = hex_to_id("0703c317e28068f39834ae61e7ab941b7d672322");
+    let orphan_of_new_history = hex_to_id_for_hash(
+        "0703c317e28068f39834ae61e7ab941b7d672322",
+        "cef644a397bdab210ac612ec4c37efa4c82b77a2d51e1fbc86327aa987b3eb7a",
+    );
     assert_eq!(
         third_commit.parents().collect::<Vec<_>>(),
         vec![orphan_of_new_history],
@@ -299,7 +403,10 @@ fn object_replacement() -> crate::Result {
     let hdr = handle.try_header(&orphan_of_new_history)?.expect("present");
     assert_eq!(hdr.kind(), gix_object::Kind::Commit);
 
-    let long_history_tip = hex_to_id("71f537d9d78bf6ae89a29a17e54b95a914d3d2ef");
+    let long_history_tip = hex_to_id_for_hash(
+        "71f537d9d78bf6ae89a29a17e54b95a914d3d2ef",
+        "f4281801102775cb861f46ab1f285218691cb21000f9ae2abea8dd2c05556c6c",
+    );
     let unrelated_mapping = (
         ObjectId::null(handle.store_ref().object_hash()),
         ObjectId::null(handle.store_ref().object_hash()),
@@ -307,13 +414,17 @@ fn object_replacement() -> crate::Result {
 
     let mut handle = gix_odb::at_opts(
         dir.join(".git/objects"),
+        gix_testtools::object_hash(),
         vec![(short_history_link, long_history_tip), unrelated_mapping],
-        gix_odb::store::init::Options { ..Default::default() },
+        Default::default(),
     )?;
     drop(orphan);
 
     let replaced = handle.find_commit(&short_history_link, &mut buf)?;
-    let long_history_second_id = hex_to_id("753ccf815e7b69c9147db5bbf633fe5f7da24ad7");
+    let long_history_second_id = hex_to_id_for_hash(
+        "753ccf815e7b69c9147db5bbf633fe5f7da24ad7",
+        "169cd5b44271f67a6a75d23cc480456142ea348bf6fa769678afd4e277150643",
+    );
     assert_eq!(
         replaced.parents().collect::<Vec<_>>(),
         vec![long_history_second_id],
@@ -396,7 +507,6 @@ fn contains() {
 
     // pack, the smallest one
     // The new handle should make no difference.
-    #[allow(clippy::redundant_clone)]
     let mut new_handle = handle.clone();
     assert!(new_handle.exists(&hex_to_id("501b297447a8255d3533c6858bb692575cdefaa0")));
     assert_eq!(
@@ -416,7 +526,7 @@ fn contains() {
         "when asking for an object in the smallest pack, all in between packs are also loaded."
     );
 
-    assert!(!new_handle.exists(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+    assert!(!new_handle.exists(&missing_id(&new_handle)));
     assert_eq!(
         new_handle.store_ref().metrics(),
         gix_odb::store::Metrics {
@@ -435,7 +545,7 @@ fn contains() {
     );
 
     new_handle.refresh_never();
-    assert!(!new_handle.exists(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+    assert!(!new_handle.exists(&missing_id(&new_handle)));
     assert_eq!(
         new_handle.store_ref().metrics(),
         gix_odb::store::Metrics {
@@ -518,7 +628,7 @@ fn lookup() {
         handle.refresh_mode(),
         store::RefreshMode::AfterAllIndicesLoaded
     ));
-    assert!(!handle.exists(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+    assert!(!handle.exists(&missing_id(&handle)));
 
     all_loaded.num_refreshes += 1;
     assert_eq!(
@@ -529,11 +639,39 @@ fn lookup() {
 
     handle.refresh_never();
     let previous_refresh_count = all_loaded.num_refreshes;
-    assert!(!handle.exists(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+    assert!(!handle.exists(&missing_id(&handle)));
     assert_eq!(
         handle.store_ref().metrics().num_refreshes,
         previous_refresh_count,
         "it didn't try to refresh the on-disk state after failing to find the object."
+    );
+}
+
+#[test]
+fn exists_without_refresh() {
+    let handle = db();
+    assert!(
+        handle.exists_without_refresh(&hex_to_id("dd25c539efbb0ab018caa4cda2d133285634e9b5")),
+        "the store still reads the object directory once and loads the indices it finds"
+    );
+    assert!(
+        handle.exists_without_refresh(&hex_to_id("37d4e6c5c48ba0d245164c4e10d5f41140cab980")),
+        "loose objects are found too"
+    );
+
+    let num_refreshes = handle.store_ref().metrics().num_refreshes;
+    assert!(!handle.exists_without_refresh(&missing_id(&handle)));
+    assert_eq!(
+        handle.store_ref().metrics().num_refreshes,
+        num_refreshes,
+        "a miss doesn't look for new packs…"
+    );
+
+    assert!(!handle.exists(&missing_id(&handle)));
+    assert_eq!(
+        handle.store_ref().metrics().num_refreshes,
+        num_refreshes + 1,
+        "…while `exists()` does, as the handle's refresh mode allows it"
     );
 }
 
@@ -570,18 +708,24 @@ mod disambiguate_prefix {
     use gix_odb::store::prefix::disambiguate::Candidate;
 
     use crate::{
-        odb::{hex_to_id, store::dynamic::all_orderings},
+        hex_to_id,
+        store::dynamic::all_orderings,
         store::dynamic::{assert_all_indices_loaded, db_with_all_object_sources},
     };
 
     #[test]
-    fn unambiguous_hex_lengths_yield_prefixes_of_exactly_the_given_length() -> crate::Result {
+    fn unambiguous_hex_lengths_yield_prefixes_of_exactly_the_given_length() -> gix_testtools::TestResult {
         let (mut handle, _tmp) = db_with_all_object_sources()?;
         handle.refresh.never();
 
         let hex_lengths = &[5, 7, 40];
         for order in all_orderings() {
-            for (index, oid) in handle.iter()?.with_ordering(order).map(Result::unwrap).enumerate() {
+            for (index, oid) in handle
+                .iter()?
+                .with_ordering(order)
+                .map(std::result::Result::unwrap)
+                .enumerate()
+            {
                 let hex_len = hex_lengths[index % hex_lengths.len()];
                 let prefix = handle
                     .disambiguate_prefix(Candidate::new(oid, hex_len)?)?
@@ -613,12 +757,12 @@ mod disambiguate_prefix {
         let (handle, _tmp) = db_with_all_object_sources().unwrap();
         let id = hex_to_id("a7065b5e971a6d8b55875d8cf634a3a37202ab23");
         let potential_prefix = Candidate::new(id, 40).unwrap();
-        assert!(
+        assert_eq!(
             handle
                 .disambiguate_prefix(potential_prefix)
                 .unwrap()
-                .expect("object exists")
-                == potential_prefix.to_prefix(),
+                .expect("object exists"),
+            potential_prefix.to_prefix(),
         );
 
         assert_eq!(
@@ -641,10 +785,12 @@ mod disambiguate_prefix {
     fn returns_none_if_id_does_not_exist() {
         let (handle, _tmp) = db_with_all_object_sources().unwrap();
         let null = gix_hash::ObjectId::null(gix_hash::Kind::Sha1);
-        assert!(handle
-            .disambiguate_prefix(Candidate::new(null, 7).unwrap())
-            .unwrap()
-            .is_none());
+        assert!(
+            handle
+                .disambiguate_prefix(Candidate::new(null, 7).unwrap())
+                .unwrap()
+                .is_none()
+        );
         assert_all_indices_loaded(&handle, 2, 2);
     }
 }
@@ -652,25 +798,25 @@ mod disambiguate_prefix {
 mod iter {
     use gix_odb::store::iter::Ordering;
 
-    use crate::odb::{
+    use crate::{
         db,
         store::dynamic::{all_orderings, db_with_all_object_sources},
     };
 
     #[test]
-    fn iteration_ordering_is_effective() -> crate::Result {
+    fn iteration_ordering_is_effective() -> gix_testtools::TestResult {
         assert_eq!(all_orderings().len(), 2, "new orderings cause this test to be reviewed");
         for (handle, _tmp) in [db_with_all_object_sources().map(|(a, b)| (a, Some(b)))?, (db(), None)] {
             let (mut a, mut b): (Vec<_>, Vec<_>) = (
                 handle
                     .iter()?
                     .with_ordering(Ordering::PackLexicographicalThenLooseLexicographical)
-                    .map(Result::unwrap)
+                    .map(std::result::Result::unwrap)
                     .collect(),
                 handle
                     .iter()?
                     .with_ordering(Ordering::PackAscendingOffsetThenLooseLexicographical)
-                    .map(Result::unwrap)
+                    .map(std::result::Result::unwrap)
                     .collect(),
             );
             assert_eq!(a.len(), b.len(), "count isn't affected by ordering");
@@ -690,7 +836,8 @@ mod lookup_prefix {
     use maplit::hashset;
 
     use crate::{
-        odb::{hex_to_id, store::dynamic::all_orderings},
+        hex_to_id,
+        store::dynamic::all_orderings,
         store::dynamic::{assert_all_indices_loaded, db_with_all_object_sources},
     };
 
@@ -734,13 +881,18 @@ mod lookup_prefix {
     }
 
     #[test]
-    fn iterable_objects_can_be_looked_up_with_varying_prefix_lengths() -> crate::Result {
+    fn iterable_objects_can_be_looked_up_with_varying_prefix_lengths() -> gix_testtools::TestResult {
         let (mut handle, _tmp) = db_with_all_object_sources()?;
         handle.refresh.never();
 
         let hex_lengths = &[5, 7, 40];
         for order in all_orderings() {
-            for (index, oid) in handle.iter()?.with_ordering(order).map(Result::unwrap).enumerate() {
+            for (index, oid) in handle
+                .iter()?
+                .with_ordering(order)
+                .map(std::result::Result::unwrap)
+                .enumerate()
+            {
                 for mut candidates in [None, Some(HashSet::default())] {
                     let hex_len = hex_lengths[index % hex_lengths.len()];
                     let prefix = gix_hash::Prefix::new(&oid, hex_len)?;
@@ -765,7 +917,7 @@ mod lookup_prefix {
 #[test]
 fn missing_objects_triggers_everything_is_loaded() {
     let handle = db();
-    assert!(!handle.exists(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+    assert!(!handle.exists(&missing_id(&handle)));
 
     assert_eq!(
         handle.store_ref().metrics(),
@@ -785,9 +937,7 @@ fn missing_objects_triggers_everything_is_loaded() {
     );
 
     let mut buf = Vec::new();
-    assert!(handle
-        .find(&hex_to_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), &mut buf)
-        .is_err());
+    assert!(handle.find(&missing_id(&handle), &mut buf).is_err());
 
     assert_eq!(
         handle.store_ref().metrics(),
@@ -808,7 +958,7 @@ fn missing_objects_triggers_everything_is_loaded() {
 }
 
 #[test]
-fn iterate_over_a_bunch_of_loose_and_packed_objects() -> crate::Result {
+fn iterate_over_a_bunch_of_loose_and_packed_objects() -> gix_testtools::TestResult {
     let (db, _tmp) = db_with_all_object_sources()?;
     for order in all_orderings() {
         let iter = db.iter()?.with_ordering(order);
@@ -826,22 +976,17 @@ fn iterate_over_a_bunch_of_loose_and_packed_objects() -> crate::Result {
 }
 
 #[test]
-fn auto_refresh_with_and_without_id_stability() -> crate::Result {
+fn auto_refresh_with_and_without_id_stability() -> gix_testtools::TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     assert!(
-        Command::new("git")
-            .arg("-C")
-            .arg(tmp.path())
+        gix_testtools::git_command(tmp.path())
             .arg("init")
             .arg("--bare")
             .status()?
             .success(),
         "git should work"
     );
-    gix_testtools::copy_recursively_into_existing_dir(
-        fixture_path_standalone("objects/pack"),
-        tmp.path().join("objects/pack"),
-    )?;
+    gix_testtools::copy_recursively_into_existing_dir(fixture_path("objects/pack"), tmp.path().join("objects/pack"))?;
     let hide_pack = |name: &str| {
         let stem = tmp.path().join("objects/pack").join(name);
         std::fs::rename(stem.with_extension("idx"), stem.with_extension("idx.bak")).unwrap();
@@ -855,7 +1000,7 @@ fn auto_refresh_with_and_without_id_stability() -> crate::Result {
     hide_pack("pack-11fdfa9e156ab73caae3b6da867192221f2089c2");
     hide_pack("pack-a2bf8e71d8c18879e499335762dd95119d93d9f1");
 
-    let handle = gix_odb::at(tmp.path().join("objects"))?;
+    let handle = gix_odb::at(tmp.path().join("objects"), gix_hash::Kind::Sha1)?;
     let mut buf = Vec::new();
     assert!(
         handle
@@ -910,7 +1055,7 @@ fn auto_refresh_with_and_without_id_stability() -> crate::Result {
         let mut stable_handle = handle.clone();
         stable_handle.prevent_pack_unload();
         let location = stable_handle
-            .location_by_oid(&hex_to_id("501b297447a8255d3533c6858bb692575cdefaa0"), &mut buf)
+            .location_by_oid(&hex_to_id("501b297447a8255d3533c6858bb692575cdefaa0"), &mut buf)?
             .expect("object exists");
         assert!(
             stable_handle.entry_by_location(&location).is_some(),
@@ -922,7 +1067,7 @@ fn auto_refresh_with_and_without_id_stability() -> crate::Result {
 
         assert!(
             stable_handle
-                .location_by_oid(&hex_to_id("4dac9989f96bc5b5b1263b582c08f0c5f0b58542"), &mut buf)
+                .location_by_oid(&hex_to_id("4dac9989f96bc5b5b1263b582c08f0c5f0b58542"), &mut buf)?
                 .is_some(),
             "it finds the object in the newly unhidden pack, which also triggers a refresh providing it with new indices"
         );
@@ -983,8 +1128,8 @@ fn auto_refresh_with_and_without_id_stability() -> crate::Result {
 mod verify {
     use std::sync::atomic::AtomicBool;
 
-    use gix_features::progress;
-    use gix_testtools::fixture_path_standalone;
+    use gix_testtools::fixture_path;
+    use gix_utils::progress;
 
     use crate::store::dynamic::db;
 
@@ -998,20 +1143,20 @@ mod verify {
         assert_eq!(outcome.index_statistics.len(), 3, "there are only three packs to check");
         assert_eq!(
             outcome.index_statistics[0].path,
-            fixture_path_standalone("objects/pack/pack-c0438c19fb16422b6bbcce24387b3264416d485b.idx")
+            fixture_path("objects/pack/pack-c0438c19fb16422b6bbcce24387b3264416d485b.idx")
         );
         assert_eq!(
             outcome.index_statistics[1].path,
-            fixture_path_standalone("objects/pack/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.idx")
+            fixture_path("objects/pack/pack-a2bf8e71d8c18879e499335762dd95119d93d9f1.idx")
         );
         assert_eq!(
             outcome.index_statistics[2].path,
-            fixture_path_standalone("objects/pack/pack-11fdfa9e156ab73caae3b6da867192221f2089c2.idx")
+            fixture_path("objects/pack/pack-11fdfa9e156ab73caae3b6da867192221f2089c2.idx")
         );
         assert_eq!(
             outcome.loose_object_stores,
             vec![gix_odb::store::verify::integrity::LooseObjectStatistics {
-                path: fixture_path_standalone("objects"),
+                path: fixture_path("objects"),
                 statistics: gix_odb::loose::verify::integrity::Statistics { num_objects: 7 }
             }]
         );

@@ -11,22 +11,21 @@ pub enum RefsAction {
 }
 
 mod fetch_fn {
-    use gix_features::progress::NestedProgress;
+    use crate::bisync::bisync;
+    use gix_error::{ErrorExt, Result, ResultExt, message};
     use gix_protocol::{
-        credentials,
+        Command, LsRefsCommand, credentials,
         fetch::{Arguments, Response},
-        indicate_end_of_interaction, Command, LsRefsCommand,
+        indicate_end_of_interaction,
     };
-    #[cfg(feature = "async-client")]
+    #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
     use gix_transport::client::async_io::{ExtendedBufRead, HandleProgress, Transport};
     #[cfg(feature = "blocking-client")]
     use gix_transport::client::blocking_io::{ExtendedBufRead, HandleProgress, Transport};
-    use maybe_async::maybe_async;
-    use std::borrow::Cow;
+    use gix_utils::progress::NestedProgress;
     use std::ops::ControlFlow;
 
     use super::{Action, Delegate, RefsAction};
-    use crate::fetch::Error;
 
     /// A way to indicate how to treat the connection underlying the transport, potentially allowing to reuse it.
     #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -66,8 +65,7 @@ mod fetch_fn {
     /// # WARNING - Do not use!
     ///
     /// As it will hang when having multiple negotiation rounds.
-    #[allow(clippy::result_large_err)]
-    #[maybe_async]
+    #[bisync]
     // TODO: remove this without losing test coverage - we have the same but better in `gix` and it's
     //       not really worth it to maintain the delegates here.
     pub async fn legacy_fetch<F, D, T, P>(
@@ -78,9 +76,9 @@ mod fetch_fn {
         fetch_mode: FetchConnection,
         agent: impl Into<String>,
         trace: bool,
-    ) -> Result<(), Error>
+    ) -> Result
     where
-        F: FnMut(credentials::helper::Action) -> credentials::protocol::Result,
+        F: FnMut(credentials::helper::Action) -> Result<Option<credentials::protocol::Outcome>>,
         D: Delegate,
         T: Transport,
         P: NestedProgress + 'static,
@@ -98,7 +96,8 @@ mod fetch_fn {
             delegate.handshake_extra_parameters(),
             &mut progress,
         )
-        .await?;
+        .await
+        .or_raise(|| message("Protocol handshake failed"))?;
 
         let agent = gix_protocol::agent(agent);
         let refs = match refs {
@@ -106,21 +105,25 @@ mod fetch_fn {
             None => match delegate.action() {
                 Ok(RefsAction::Skip) => Vec::new(),
                 Ok(RefsAction::Continue) => {
-                    #[cfg(feature = "async-client")]
+                    #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
                     {
-                        LsRefsCommand::new(None, &capabilities, ("agent", Some(Cow::Owned(agent.clone()))))
+                        LsRefsCommand::new(None, &capabilities, ("agent", Some(agent.clone())))
                             .invoke_async(&mut transport, &mut progress, trace)
-                            .await?
+                            .await
+                            .or_raise(|| message("Failed to list remote references"))?
                     }
                     #[cfg(feature = "blocking-client")]
                     {
-                        LsRefsCommand::new(None, &capabilities, ("agent", Some(Cow::Owned(agent.clone()))))
-                            .invoke_blocking(&mut transport, &mut progress, trace)?
+                        LsRefsCommand::new(None, &capabilities, ("agent", Some(agent.clone())))
+                            .invoke_blocking(&mut transport, &mut progress, trace)
+                            .or_raise(|| message("Failed to list remote references"))?
                     }
                 }
                 Err(err) => {
-                    indicate_end_of_interaction(transport, trace).await?;
-                    return Err(err.into());
+                    indicate_end_of_interaction(transport, trace)
+                        .await
+                        .or_raise(|| message("Failed to end the interaction"))?;
+                    return Err(err.and_raise(message("Failed to prepare listing remote references")));
                 }
             },
         };
@@ -132,7 +135,9 @@ mod fetch_fn {
                 return if matches!(protocol_version, gix_transport::Protocol::V1)
                     || matches!(fetch_mode, FetchConnection::TerminateOnSuccessfulCompletion)
                 {
-                    indicate_end_of_interaction(transport, trace).await.map_err(Into::into)
+                    indicate_end_of_interaction(transport, trace)
+                        .await
+                        .or_raise(|| message("Failed to end the interaction"))
                 } else {
                     Ok(())
                 };
@@ -143,14 +148,16 @@ mod fetch_fn {
                     .expect("BUG: delegates must always produce valid arguments");
             }
             Err(err) => {
-                indicate_end_of_interaction(transport, trace).await?;
-                return Err(err.into());
+                indicate_end_of_interaction(transport, trace)
+                    .await
+                    .or_raise(|| message("Failed to end the interaction"))?;
+                return Err(err.and_raise(message("Failed to prepare the fetch")));
             }
         }
 
         Response::check_required_features(protocol_version, &fetch_features)?;
         let sideband_all = fetch_features.iter().any(|(n, _)| *n == "sideband-all");
-        fetch_features.push(("agent", Some(Cow::Owned(agent))));
+        fetch_features.push(("agent", Some(agent)));
         let mut arguments = Arguments::new(protocol_version, fetch_features, trace);
         let mut previous_response = None::<Response>;
         let mut round = 1;
@@ -158,8 +165,13 @@ mod fetch_fn {
             progress.step();
             progress.set_name(format!("negotiate (round {round})"));
             round += 1;
-            let action = delegate.negotiate(&refs, &mut arguments, previous_response.as_ref())?;
-            let mut reader = arguments.send(&mut transport, action == Action::Cancel).await?;
+            let action = delegate
+                .negotiate(&refs, &mut arguments, previous_response.as_ref())
+                .or_raise(|| message("Fetch negotiation failed"))?;
+            let mut reader = arguments
+                .send(&mut transport, action == Action::Cancel)
+                .await
+                .or_raise(|| message("Failed to send fetch arguments"))?;
             if sideband_all {
                 setup_remote_progress(&mut progress, &mut reader);
             }
@@ -169,14 +181,18 @@ mod fetch_fn {
                 true,  /* hack, telling us we don't want this delegate approach anymore */
                 false, /* just as much of a hack which causes us to expect a pack immediately */
             )
-            .await?;
+            .await
+            .or_raise(|| message("Could not decode server reply"))?;
             previous_response = if response.has_pack() {
                 progress.step();
                 progress.set_name("receiving pack".into());
                 if !sideband_all {
                     setup_remote_progress(&mut progress, &mut reader);
                 }
-                delegate.receive_pack(reader, progress, &refs, &response).await?;
+                delegate
+                    .receive_pack(reader, progress, &refs, &response)
+                    .await
+                    .or_raise(|| message("Failed to receive pack"))?;
                 break 'negotiation;
             } else {
                 match action {
@@ -188,7 +204,9 @@ mod fetch_fn {
         if matches!(protocol_version, gix_transport::Protocol::V2)
             && matches!(fetch_mode, FetchConnection::TerminateOnSuccessfulCompletion)
         {
-            indicate_end_of_interaction(transport, trace).await?;
+            indicate_end_of_interaction(transport, trace)
+                .await
+                .or_raise(|| message("Failed to end the interaction"))?;
         }
         Ok(())
     }
@@ -207,16 +225,16 @@ mod fetch_fn {
         }) as HandleProgress<'a>));
     }
 }
-pub use fetch_fn::{legacy_fetch as fetch, FetchConnection};
+pub use fetch_fn::{FetchConnection, legacy_fetch as fetch};
 
 mod delegate {
     use std::{
-        borrow::Cow,
         io,
         ops::{Deref, DerefMut},
     };
 
     use gix_protocol::{
+        command::Feature,
         fetch::{Arguments, Response},
         handshake::Ref,
     };
@@ -274,7 +292,7 @@ mod delegate {
             &mut self,
             _version: gix_transport::Protocol,
             _server: &Capabilities,
-            _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+            _features: &mut Vec<Feature>,
             _refs: &[Ref],
         ) -> std::io::Result<Action> {
             Ok(Action::Continue)
@@ -328,7 +346,7 @@ mod delegate {
             &mut self,
             _version: gix_transport::Protocol,
             _server: &Capabilities,
-            _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+            _features: &mut Vec<Feature>,
             _refs: &[Ref],
         ) -> io::Result<Action> {
             self.deref_mut().prepare_fetch(_version, _server, _features, _refs)
@@ -357,7 +375,7 @@ mod delegate {
             &mut self,
             _version: gix_transport::Protocol,
             _server: &Capabilities,
-            _features: &mut Vec<(&str, Option<Cow<'_, str>>)>,
+            _features: &mut Vec<Feature>,
             _refs: &[Ref],
         ) -> io::Result<Action> {
             self.deref_mut().prepare_fetch(_version, _server, _features, _refs)
@@ -380,8 +398,8 @@ mod delegate {
             ops::DerefMut,
         };
 
-        use gix_features::progress::NestedProgress;
         use gix_protocol::{fetch::Response, handshake::Ref};
+        use gix_utils::progress::NestedProgress;
 
         use super::DelegateBlocking;
 
@@ -435,14 +453,14 @@ mod delegate {
     #[cfg(feature = "blocking-client")]
     pub use blocking_io::Delegate;
 
-    #[cfg(feature = "async-client")]
+    #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
     mod async_io {
         use std::{io, ops::DerefMut};
 
         use async_trait::async_trait;
         use futures_io::AsyncBufRead;
-        use gix_features::progress::NestedProgress;
         use gix_protocol::{fetch::Response, handshake::Ref};
+        use gix_utils::progress::NestedProgress;
 
         use super::DelegateBlocking;
 
@@ -453,6 +471,7 @@ mod delegate {
         /// Everything is tucked away behind type-safety so 'nothing can go wrong'©. Runtime assertions assure invalid
         /// features or arguments don't make it to the server in the first place.
         /// Please note that this trait mostly corresponds to what V2 would look like, even though V1 is supported as well.
+        #[allow(clippy::double_must_use)] // `async_trait` generates `#[must_use]` on boxed futures.
         #[async_trait(?Send)]
         pub trait Delegate: DelegateBlocking {
             /// Receive a pack provided from the given `input`, and the caller should consider it to be blocking as
@@ -500,7 +519,7 @@ mod delegate {
             }
         }
     }
-    #[cfg(feature = "async-client")]
+    #[cfg(all(feature = "async-client", not(feature = "blocking-client")))]
     pub use async_io::Delegate;
 }
 #[cfg(any(feature = "async-client", feature = "blocking-client"))]

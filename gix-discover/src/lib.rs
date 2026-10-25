@@ -17,7 +17,8 @@
 //! # )?;
 //! # let nested = dir.path().join("src").join("module");
 //! # std::fs::create_dir_all(&nested)?;
-//! let (path, _trust) = gix_discover::upwards(&nested)?;
+//! let (path, _trust) =
+//!     gix_discover::upwards(&nested)?;
 //! let (repository_dir, worktree_dir) = path.into_repository_and_work_tree_directories();
 //!
 //! assert_eq!(repository_dir, git_dir);
@@ -25,7 +26,7 @@
 //! assert!(gix_discover::is_git(&repository_dir).is_ok());
 //! # Ok(()) }
 //! ```
-#![deny(missing_docs, rust_2018_idioms)]
+#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 /// The name of the `.git` directory.
@@ -37,39 +38,11 @@ pub const MODULES: &str = "modules";
 ///
 pub mod repository;
 
-///
-pub mod is_git {
-    use std::path::PathBuf;
-
-    /// The error returned by [`crate::is_git()`].
-    #[derive(Debug, thiserror::Error)]
-    #[allow(missing_docs)]
-    pub enum Error {
-        #[error("Could not find a valid HEAD reference")]
-        FindHeadRef(#[from] gix_ref::file::find::existing::Error),
-        #[error("Missing HEAD at '.git/HEAD'")]
-        MissingHead,
-        #[error("Expected HEAD at '.git/HEAD', got '.git/{}'", .name)]
-        MisplacedHead { name: bstr::BString },
-        #[error("Expected an objects directory at '{}'", .missing.display())]
-        MissingObjectsDirectory { missing: PathBuf },
-        #[error("The worktree's private repo's commondir file at '{}' or it could not be read", .missing.display())]
-        MissingCommonDir { missing: PathBuf, source: std::io::Error },
-        #[error("Expected a refs directory at '{}'", .missing.display())]
-        MissingRefsDirectory { missing: PathBuf },
-        #[error(transparent)]
-        GitFile(#[from] crate::path::from_gitdir_file::Error),
-        #[error("Could not retrieve metadata of \"{path}\"")]
-        Metadata { source: std::io::Error, path: PathBuf },
-        #[error("The repository's config file doesn't exist or didn't have a 'bare' configuration or contained core.worktree without value")]
-        Inconclusive,
-        #[error("Could not obtain current directory for resolving the '.' repository path")]
-        CurrentDir(#[from] std::io::Error),
-    }
-}
-
 mod is;
-#[allow(deprecated)]
+#[expect(
+    deprecated,
+    reason = "this re-export preserves compatibility with the deprecated API"
+)]
 pub use is::submodule_git_dir as is_submodule_git_dir;
 pub use is::{bare as is_bare, git as is_git};
 

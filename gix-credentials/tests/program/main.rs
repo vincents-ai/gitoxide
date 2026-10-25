@@ -1,9 +1,66 @@
+use bstr::ByteSlice;
 use gix_credentials::program::main;
-use std::io::Cursor;
+use gix_error::Result;
+use std::{ffi::OsString, io::Cursor};
 
-#[derive(Debug, thiserror::Error)]
-#[error("Test error")]
-struct TestError;
+#[test]
+fn action_aliases_are_accepted() -> gix_testtools::TestResult {
+    for (input, expected) in [
+        ("get", "get"),
+        ("fill", "get"),
+        ("store", "store"),
+        ("approve", "store"),
+        ("erase", "erase"),
+        ("reject", "erase"),
+    ] {
+        assert_eq!(
+            main::Action::try_from(OsString::from(input))?.as_str(),
+            expected,
+            "helper and Git action names select the same action"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_actions_are_validation_errors() {
+    for input in ["", "invalid", "Get", "get "] {
+        let err = main::Action::try_from(OsString::from(input)).expect_err("the action is invalid");
+        assert!(
+            err.is_validation(),
+            "invalid actions are classified as validation errors"
+        );
+    }
+}
+
+#[test]
+fn context_options_apply_to_input_and_output() -> gix_testtools::TestResult {
+    let input = b"url=https://github.com/with\rreturn\n";
+    let mut output = Vec::new();
+    let options = gix_credentials::protocol::ContextOptions {
+        protect_protocol: false,
+    };
+
+    main(
+        ["get".into()],
+        Cursor::new(input),
+        &mut output,
+        options,
+        |_action, context| -> Result<Option<gix_credentials::protocol::Context>> {
+            assert_eq!(
+                context.url.as_ref().map(|url| url.as_slice()),
+                Some(&input[4..input.len() - 1])
+            );
+            Ok(Some(gix_credentials::protocol::Context {
+                username: Some("user\rname".into()),
+                ..Default::default()
+            }))
+        },
+    )?;
+
+    assert!(output.contains_str("user\rname"));
+    Ok(())
+}
 
 #[test]
 fn protocol_and_host_without_url_is_valid() {
@@ -15,7 +72,8 @@ fn protocol_and_host_without_url_is_valid() {
         ["get".into()],
         Cursor::new(input),
         &mut output,
-        |_action, context| -> Result<Option<gix_credentials::protocol::Context>, TestError> {
+        gix_credentials::protocol::ContextOptions::default(),
+        |_action, context| -> Result<Option<gix_credentials::protocol::Context>> {
             assert_eq!(context.protocol.as_deref(), Some("https"));
             assert_eq!(context.host.as_deref(), Some("github.com"));
             assert_eq!(context.url, None, "the URL isn't automatically populated");
@@ -27,19 +85,21 @@ fn protocol_and_host_without_url_is_valid() {
 
     // This should fail because our mock helper returned None (no credentials found)
     // but it should NOT fail because of missing URL
-    match result {
-        Err(gix_credentials::program::main::Error::CredentialsMissing { .. }) => {
-            assert!(
-                called,
-                "The helper gets called, but as nothing is provided in the function it ulimately fails"
-            );
-        }
-        other => panic!("Expected CredentialsMissing error, got: {other:?}"),
-    }
+    let err = result.expect_err("missing credentials must fail");
+    insta::assert_debug_snapshot!(err, "protocol and host without url is valid", @r#"Credentials for "https://github.com" could not be obtained"#);
+    assert!(
+        err.is_unauthenticated(),
+        "missing credentials require obtaining an identity"
+    );
+    assert!(
+        called,
+        "The helper gets called, but as nothing is provided in the function it ultimately fails"
+    );
 }
 
 #[test]
 fn missing_protocol_with_only_host_or_protocol_fails() {
+    let mut error_snapshots = Vec::new();
     for input in ["host=github.com\n", "protocol=https\n"] {
         let mut output = Vec::new();
 
@@ -48,19 +108,24 @@ fn missing_protocol_with_only_host_or_protocol_fails() {
             ["get".into()],
             Cursor::new(input),
             &mut output,
-            |_action, _context| -> Result<Option<gix_credentials::protocol::Context>, TestError> {
+            gix_credentials::protocol::ContextOptions::default(),
+            |_action, _context| -> Result<Option<gix_credentials::protocol::Context>> {
                 called = true;
                 Ok(None)
             },
         );
 
-        match result {
-            Err(gix_credentials::program::main::Error::UrlMissing) => {
-                assert!(!called, "the context is lacking, hence nothing gets called");
-            }
-            other => panic!("Expected UrlMissing error, got: {other:?}"),
-        }
+        let err = result.expect_err("incomplete URL must fail validation");
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+        assert!(err.is_validation());
+        assert!(!called, "the context is lacking, hence nothing gets called");
     }
+    insta::assert_debug_snapshot!(error_snapshots, "missing protocol with only host or protocol fails", @"
+    [
+        Either 'url' field or both 'protocol' and 'host' fields must be provided,
+        Either 'url' field or both 'protocol' and 'host' fields must be provided,
+    ]
+    ");
 }
 
 #[test]
@@ -73,7 +138,8 @@ fn url_alone_is_valid() {
         ["get".into()],
         Cursor::new(input),
         &mut output,
-        |_action, context| -> Result<Option<gix_credentials::protocol::Context>, TestError> {
+        gix_credentials::protocol::ContextOptions::default(),
+        |_action, context| -> Result<Option<gix_credentials::protocol::Context>> {
             called = true;
             assert_eq!(context.url.unwrap(), "https://github.com");
             assert_eq!(context.host, None, "not auto-populated");
@@ -85,10 +151,11 @@ fn url_alone_is_valid() {
 
     // This should fail because our mock helper returned None (no credentials found)
     // but it should NOT fail because of missing URL
-    match result {
-        Err(gix_credentials::program::main::Error::CredentialsMissing { .. }) => {
-            assert!(called);
-        }
-        other => panic!("Expected CredentialsMissing error, got: {other:?}"),
-    }
+    let err = result.expect_err("missing credentials must fail");
+    insta::assert_debug_snapshot!(err, "url alone is valid", @r#"Credentials for "https://github.com" could not be obtained"#);
+    assert!(
+        err.is_unauthenticated(),
+        "missing credentials require obtaining an identity"
+    );
+    assert!(called);
 }

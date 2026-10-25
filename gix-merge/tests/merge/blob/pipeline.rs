@@ -1,17 +1,19 @@
 use bstr::ByteSlice;
 use gix_filter::{eol, eol::AutoCrlf};
 use gix_merge::blob::{
-    pipeline::{self, Mode, WorktreeRoots},
     Pipeline, ResourceKind,
+    pipeline::{self, Mode, WorktreeRoots},
 };
 use gix_object::tree::EntryKind;
+use gix_testtools::TestResult;
 
-use crate::blob::util::ObjectDb;
+use crate::blob::util::{insert, object_db};
 
 const ALL_MODES: [pipeline::Mode; 2] = [pipeline::Mode::ToGit, pipeline::Mode::Renormalize];
 
 #[test]
-fn without_transformation() -> crate::Result {
+fn without_transformation() -> TestResult {
+    let mut error_snapshots = Vec::new();
     for mode in ALL_MODES {
         let tmp = gix_testtools::tempfile::TempDir::new()?;
         let mut filter = Pipeline::new(
@@ -19,7 +21,7 @@ fn without_transformation() -> crate::Result {
                 common_ancestor_root: Some(tmp.path().to_owned()),
                 ..Default::default()
             },
-            gix_filter::Pipeline::default(),
+            gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
             default_options(),
         );
 
@@ -56,10 +58,8 @@ fn without_transformation() -> crate::Result {
             )
             .unwrap_err();
 
-        assert!(
-            matches!(err, pipeline::convert_to_mergeable::Error::InvalidEntryKind {rela_path,actual}
-                if rela_path == link_name && actual == EntryKind::Link)
-        );
+        error_snapshots.push(gix_testtools::redact_debug_snapshot(&(err), &[]));
+        assert!(err.is_validation(), "an unsupported entry kind is a validation failure");
         assert_eq!(
             buf.len(),
             9,
@@ -67,9 +67,9 @@ fn without_transformation() -> crate::Result {
         );
         drop(tmp);
 
-        let mut db = ObjectDb::default();
+        let db = object_db();
         let b_content = "b-content";
-        let id = db.insert(b_content)?;
+        let id = insert(&db, b_content)?;
 
         let out = filter.convert_to_mergeable(
             &id,
@@ -114,18 +114,24 @@ fn without_transformation() -> crate::Result {
         assert_eq!(out, None, "the lack of file on disk is fine as well");
     }
 
+    insta::assert_debug_snapshot!(error_snapshots, "without transformation", @"
+    [
+        Entry at 'link' must be regular file or symlink, but was Link,
+        Entry at 'link' must be regular file or symlink, but was Link,
+    ]
+    ");
     Ok(())
 }
 
 #[test]
-fn binary_below_large_file_threshold() -> crate::Result {
+fn binary_below_large_file_threshold() -> TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let mut filter = Pipeline::new(
         WorktreeRoots {
             current_root: Some(tmp.path().to_owned()),
             ..Default::default()
         },
-        gix_filter::Pipeline::default(),
+        gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
         pipeline::Options {
             large_file_threshold_bytes: 5,
         },
@@ -149,8 +155,8 @@ fn binary_below_large_file_threshold() -> crate::Result {
     assert_eq!(out, Some(pipeline::Data::Buffer), "binary data can still be merged");
     assert_eq!(buf.as_bstr(), binary_content);
 
-    let mut db = ObjectDb::default();
-    let id = db.insert(binary_content)?;
+    let db = object_db();
+    let id = insert(&db, binary_content)?;
     let out = filter.convert_to_mergeable(
         &id,
         EntryKind::Blob,
@@ -168,14 +174,14 @@ fn binary_below_large_file_threshold() -> crate::Result {
 }
 
 #[test]
-fn above_large_file_threshold() -> crate::Result {
+fn above_large_file_threshold() -> TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let mut filter = gix_merge::blob::Pipeline::new(
         WorktreeRoots {
             current_root: Some(tmp.path().to_owned()),
             ..Default::default()
         },
-        gix_filter::Pipeline::default(),
+        gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
         pipeline::Options {
             large_file_threshold_bytes: 4,
         },
@@ -204,8 +210,8 @@ fn above_large_file_threshold() -> crate::Result {
     assert_eq!(buf.len(), 0, "it should avoid querying that data in the first place");
 
     drop(tmp);
-    let mut db = ObjectDb::default();
-    let id = db.insert(large_content)?;
+    let db = object_db();
+    let id = insert(&db, large_content)?;
 
     let out = filter.convert_to_mergeable(
         &id,
@@ -229,14 +235,14 @@ fn above_large_file_threshold() -> crate::Result {
 }
 
 #[test]
-fn non_existing() -> crate::Result {
+fn non_existing() -> TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let mut filter = Pipeline::new(
         WorktreeRoots {
             common_ancestor_root: Some(tmp.path().to_owned()),
             ..Default::default()
         },
-        gix_filter::Pipeline::default(),
+        gix_filter::Pipeline::new(Default::default(), gix_testtools::object_hash(), Default::default()),
         default_options(),
     );
 
@@ -296,23 +302,20 @@ fn non_existing() -> crate::Result {
             &mut buf,
         )
         .unwrap_err();
+    insta::assert_debug_snapshot!(gix_testtools::redact_debug_snapshot(&(err), &[]), "missing object database ids are always an error (even though missing objects on disk are allowed)", @"An object with id Oid(1) could not be found");
     assert!(
-        matches!(
-            err,
-            gix_merge::blob::pipeline::convert_to_mergeable::Error::FindObject(
-                gix_object::find::existing_object::Error::NotFound { .. }
-            ),
-        ),
+        err.is_not_found(),
         "missing object database ids are always an error (even though missing objects on disk are allowed)"
     );
     Ok(())
 }
 
 #[test]
-fn worktree_filter() -> crate::Result {
+fn worktree_filter() -> TestResult {
     let tmp = gix_testtools::tempfile::TempDir::new()?;
     let filter = gix_filter::Pipeline::new(
         Default::default(),
+        gix_testtools::object_hash(),
         gix_filter::pipeline::Options {
             eol_config: eol::Configuration {
                 auto_crlf: AutoCrlf::Enabled,
@@ -330,7 +333,7 @@ fn worktree_filter() -> crate::Result {
         default_options(),
     );
 
-    let mut db = ObjectDb::default();
+    let db = object_db();
     let a_name = "a";
     let mut buf = Vec::new();
     let a_content = "a-content\r\n";
@@ -343,7 +346,7 @@ fn worktree_filter() -> crate::Result {
             a_name.into(),
             ResourceKind::CommonAncestorOrBase,
             &mut |_, _| {},
-            &gix_object::find::Never,
+            &gix_object::find::Never::panic_on_access(),
             mode,
             &mut buf,
         )?;
@@ -354,7 +357,7 @@ fn worktree_filter() -> crate::Result {
             "worktree files need to be converted back to what's stored in Git"
         );
 
-        let id = db.insert(a_content)?;
+        let id = insert(&db, a_content)?;
         let out = filter.convert_to_mergeable(
             &id,
             EntryKind::Blob,
@@ -387,7 +390,7 @@ fn worktree_filter() -> crate::Result {
     drop(tmp);
 
     let b_content = "b-content\n";
-    let id = db.insert(b_content)?;
+    let id = insert(&db, b_content)?;
 
     let out = filter.convert_to_mergeable(
         &id,
@@ -403,9 +406,9 @@ fn worktree_filter() -> crate::Result {
     assert_eq!(out, Some(pipeline::Data::Buffer));
     assert_eq!(buf.as_bstr(), b_content, "no work is done for what's already in Git");
 
-    let mut db = ObjectDb::default();
+    let db = object_db();
     let b_content = "b-content\r\n";
-    let id = db.insert(b_content)?;
+    let id = insert(&db, b_content)?;
     let out = filter.convert_to_mergeable(
         &id,
         EntryKind::Blob,

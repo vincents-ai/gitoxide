@@ -210,13 +210,9 @@ pub fn zealously_contract_hunks(
             }
         }
 
-        let mut out = Vec::with_capacity(remove_leading_a_hunks_from.unwrap_or_else(|| {
-            if a_hunk_token_equal_till.is_some() {
-                1
-            } else {
-                0
-            }
-        }));
+        let mut out = Vec::with_capacity(
+            remove_leading_a_hunks_from.unwrap_or_else(|| if a_hunk_token_equal_till.is_some() { 1 } else { 0 }),
+        );
         truncate_hunks_from_from_front(
             a_hunks,
             remove_leading_a_hunks_from,
@@ -424,9 +420,8 @@ pub fn take_intersecting(
     intersecting.clear();
 
     fn left_overlaps_right(left: &Hunk, right: &Hunk) -> bool {
-        left.side != right.side
-            && (right.before.contains(&left.before.start)
-                || (right.before.is_empty() && right.before.start == left.before.start))
+        // Like Git, consider changes disjoint only if there is a gap between their base ranges.
+        left.side != right.side && left.before.start <= right.before.end
     }
 
     loop {

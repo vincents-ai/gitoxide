@@ -11,7 +11,6 @@
 use std::{
     any::Any,
     borrow::Cow,
-    error::Error,
     io::{Cursor, Read, Write},
     sync::{Arc, Mutex},
 };
@@ -28,6 +27,7 @@ use crate::client::{
 use crate::client::git::blocking_io::Connection;
 use crate::client::git::ConnectMode;
 use crate::{Protocol, Service};
+use gix_error::{ErrorExt, ResultExt, message};
 
 /// Shared state for an SSH channel, wrapped in `Arc<Mutex>` so reader and writer
 /// can operate independently while sharing the same underlying channel.
@@ -162,7 +162,7 @@ impl Handler for KnownHostsHandler {
             Ok(true) => Ok(true),
             Ok(false) => {
                 // Key not found in known_hosts
-                gix_features::trace::warn!(
+                gix_trace::warn!(
                     "Host {}:{} not found in known_hosts. Set accept_unknown_hosts: true to accept.",
                     self.host, self.port
                 );
@@ -170,7 +170,7 @@ impl Handler for KnownHostsHandler {
             }
             Err(_e) => {
                 // Key mismatch — possible MITM attack
-                gix_features::trace::error!(
+                gix_trace::error!(
                     "Host key verification failed for {}:{}: {}",
                     self.host, self.port, e
                 );
@@ -181,24 +181,54 @@ impl Handler for KnownHostsHandler {
 }
 
 /// The error used in [`connect()`].
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 #[allow(missing_docs)]
 pub enum RusshError {
-    #[error("The scheme in \"{url}\" is not usable for an SSH connection")]
     UnsupportedScheme { url: gix_url::Url },
-    #[error("SSH key error: {0}")]
     Key(String),
-    #[error("SSH authentication failed: {0}")]
     AuthenticationFailed(String),
-    #[error("SSH connection failed: {0}")]
     ConnectionFailed(String),
-    #[error("SSH: {0}")]
-    Russh(#[from] russh::Error),
-    #[error("I/O: {0}")]
-    Io(#[from] std::io::Error),
+    Russh(russh::Error),
+    Io(std::io::Error),
 }
 
-impl crate::IsSpuriousError for RusshError {}
+impl From<std::io::Error> for RusshError {
+    fn from(err: std::io::Error) -> Self {
+        RusshError::Io(err)
+    }
+}
+
+impl From<russh::Error> for RusshError {
+    fn from(err: russh::Error) -> Self {
+        RusshError::Russh(err)
+    }
+}
+
+impl std::fmt::Display for RusshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RusshError::UnsupportedScheme { url } => {
+                write!(f, "The scheme in \"{url}\" is not usable for an SSH connection")
+            }
+            RusshError::Key(err) => write!(f, "SSH key error: {err}"),
+            RusshError::AuthenticationFailed(err) => write!(f, "SSH authentication failed: {err}"),
+            RusshError::ConnectionFailed(err) => write!(f, "SSH connection failed: {err}"),
+            RusshError::Russh(err) => write!(f, "SSH: {err}"),
+            RusshError::Io(err) => write!(f, "I/O: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for RusshError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RusshError::Russh(err) => Some(err),
+            RusshError::Io(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 
 /// Options for connecting via the native russh SSH transport.
 #[derive(Debug, Clone)]
@@ -324,10 +354,7 @@ impl TransportWithoutIO for RusshOnDemand {
         true
     }
 
-    fn configure(
-        &mut self,
-        _config: &dyn Any,
-    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    fn configure(&mut self, _config: &dyn Any) -> gix_error::Result {
         Ok(())
     }
 }
@@ -349,10 +376,7 @@ impl Transport for RusshOnDemand {
 
         pre.rt_handle
             .block_on(async { pre.channel.exec(true, exec_cmd.as_bytes()).await })
-            .map_err(|e| crate::client::Error::InvokeProgram {
-                source: std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e.to_string()),
-                command: format!("ssh {} {}", self.url.host().unwrap_or_default(), service.as_str()).into(),
-            })?;
+            .or_raise(|| message("Could not start the git service on the remote via the russh transport"))?;
 
         // Create the shared channel state and split into reader/writer
         let shared = Arc::new(Mutex::new(SharedChannel {
@@ -394,7 +418,7 @@ impl Transport for RusshOnDemand {
     ) -> Result<RequestWriter<'_>, crate::client::Error> {
         self.connection
             .as_mut()
-            .ok_or(crate::client::Error::MissingHandshake)?
+            .ok_or_else(|| message("handshake() must be called before request()").raise())?
             .request(write_mode, on_into_read, trace)
     }
 }

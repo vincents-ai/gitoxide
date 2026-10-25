@@ -1,4 +1,4 @@
-use crate::{bstr::ByteVec, name::is_pseudo_ref, Category, FullName, FullNameRef, Namespace, PartialNameRef};
+use crate::{Category, FullName, FullNameRef, Namespace, PartialNameRef, bstr::ByteVec, name::is_pseudo_ref};
 use gix_object::bstr::{BStr, BString, ByteSlice};
 use std::{borrow::Borrow, path::Path};
 
@@ -84,7 +84,8 @@ impl FullNameRef {
     }
 
     /// Convert this name into the relative path identifying the reference location.
-    pub fn to_path(&self) -> &Path {
+    /// Return an error if the name cannot be represented as a native path.
+    pub fn to_path(&self) -> gix_error::Result<&Path> {
         gix_path::from_byte_slice(&self.0)
     }
 
@@ -196,8 +197,8 @@ impl Category<'_> {
 }
 
 impl FullName {
-    /// Convert this name into the relative path, lossily, identifying the reference location relative to a repository
-    pub fn to_path(&self) -> &Path {
+    /// Convert this name into the relative path identifying its location, failing if its encoding is unrepresentable.
+    pub fn to_path(&self) -> gix_error::Result<&Path> {
         gix_path::from_byte_slice(&self.0)
     }
 

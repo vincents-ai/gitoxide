@@ -19,18 +19,14 @@ pub struct RemoteProgress<'a> {
 impl RemoteProgress<'_> {
     /// Parse the progress from a typical git progress `line` as sent by the remote.
     pub fn from_bytes(mut line: &[u8]) -> Option<RemoteProgress<'_>> {
-        parse_progress(&mut line).ok().and_then(|r| {
-            if r.percent.is_none() && r.step.is_none() && r.max.is_none() {
-                None
-            } else {
-                Some(r)
-            }
-        })
+        parse_progress(&mut line)
+            .ok()
+            .filter(|&r| !(r.percent.is_none() && r.step.is_none() && r.max.is_none()))
     }
 
     /// Parse `text`, which is interpreted as error if `is_error` is true, as [`RemoteProgress`] and call the respective
     /// methods on the given `progress` instance.
-    pub fn translate_to_progress(is_error: bool, text: &[u8], progress: &mut impl gix_features::progress::Progress) {
+    pub fn translate_to_progress(is_error: bool, text: &[u8], progress: &mut impl gix_utils::progress::Progress) {
         fn progress_name(current: Option<String>, action: &[u8]) -> String {
             match current {
                 Some(current) => format!(
@@ -55,7 +51,7 @@ impl RemoteProgress<'_> {
                     max,
                 }) => {
                     progress.set_name(progress_name(progress.name(), action));
-                    progress.init(max, gix_features::progress::count("objects"));
+                    progress.init(max, gix_utils::progress::count("objects"));
                     if let Some(step) = step {
                         progress.set(step);
                     }

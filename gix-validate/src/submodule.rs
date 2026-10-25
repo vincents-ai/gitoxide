@@ -4,7 +4,7 @@ use bstr::{BStr, ByteSlice};
 pub mod name {
     /// The error used in [name()](super::name()).
     #[derive(Debug)]
-    #[allow(missing_docs)]
+    #[expect(missing_docs)]
     #[non_exhaustive]
     pub enum Error {
         Empty,
@@ -20,7 +20,11 @@ pub mod name {
         }
     }
 
-    impl std::error::Error for Error {}
+    impl std::error::Error for Error {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(const { &gix_error::ClassificationMarker::VALIDATION })
+        }
+    }
 }
 
 /// Return the original `name` if it is valid, or the respective error indicating what was wrong with it.
