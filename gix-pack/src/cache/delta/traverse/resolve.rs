@@ -222,7 +222,7 @@ where
         // Try to avoid going into threaded mode if there isn't more than one unit of work anyway.
         if nodes.len() > 1 {
             if let Ok(initial_threads) =
-                threads_left.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |threads_available| {
+                threads_left.try_update(Ordering::SeqCst, Ordering::SeqCst, |threads_available| {
                     (threads_available > 0).then_some(0)
                 })
             {
@@ -401,7 +401,7 @@ where
                 threads.push(thread);
             }
             if threads_left
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |threads_available: isize| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |threads_available: isize| {
                     (threads_available > 0).then(|| {
                         threads_to_create = threads_available.min(threading::lock(&nodes).len() as isize);
                         threads_available - threads_to_create
