@@ -31,10 +31,8 @@ impl Arguments {
     ) -> Self {
         Self {
             updates,
-            report_status: capabilities.contains("report-status")
-                || capabilities.contains("report-status-v2"),
-            sideband: capabilities.contains("side-band-64k")
-                || capabilities.contains("side-band"),
+            report_status: capabilities.contains("report-status") || capabilities.contains("report-status-v2"),
+            sideband: capabilities.contains("side-band-64k") || capabilities.contains("side-band"),
             quiet: false,
             version,
         }
@@ -135,10 +133,10 @@ impl Arguments {
             line.extend_from_slice(update.name.as_slice());
             if i == 0 {
                 line.push(0); // NUL separator before capabilities
-                // Request report-status (plain pkt-line report, no side-band mux).
-                // The response reader in push::response does not demultiplex side-band
-                // frames, so requesting side-band-64k would make the report arrive
-                // channel-tagged and unparseable. report-status alone suffices.
+                              // Request report-status (plain pkt-line report, no side-band mux).
+                              // The response reader in push::response does not demultiplex side-band
+                              // frames, so requesting side-band-64k would make the report arrive
+                              // channel-tagged and unparseable. report-status alone suffices.
                 line.extend_from_slice(b"report-status");
             }
             line.push(b'\n');

@@ -42,10 +42,26 @@ pub(crate) mod function {
                         .or_raise(|| message("connection failed"))?,
                 )
             }
-            gix_url::Scheme::Ssh => Box::new({
-                crate::client::blocking_io::ssh::connect(url, options.version, options.ssh, options.trace)
-                    .or_raise(|| message("connection failed"))?
-            }),
+            gix_url::Scheme::Ssh => {
+                // Opt-in native SSH transport (no `ssh` subprocess).
+                #[cfg(feature = "russh-client")]
+                if let Some(ref russh_opts) = options.russh {
+                    let key = russh_opts
+                        .load_private_key()
+                        .or_raise(|| message("failed to load the SSH key for the russh transport"))?;
+                    let rt_handle = tokio::runtime::Handle::current();
+                    return Ok(Box::new(
+                        crate::client::blocking_io::ssh::russh_transport::RusshOnDemand::connect(
+                            url, key, options.version, options.trace, rt_handle,
+                        )
+                        .or_raise(|| message("failed to connect via the russh transport"))?,
+                    ));
+                }
+                Box::new({
+                    crate::client::blocking_io::ssh::connect(url, options.version, options.ssh, options.trace)
+                        .or_raise(|| message("connection failed"))?
+                })
+            }
             gix_url::Scheme::Git => {
                 if url.user().is_some() {
                     bail!(

@@ -20,7 +20,7 @@ pub enum Status {
     /// The ref update was accepted.
     Ok,
     /// The ref update was rejected with a reason.
-   Rejected(String),
+    Rejected(String),
 }
 
 /// The outcome of a push operation.

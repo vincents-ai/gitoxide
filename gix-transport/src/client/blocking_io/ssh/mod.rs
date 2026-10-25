@@ -226,3 +226,9 @@ fn build_client_feature_check_command(ssh_cmd: &OsStr, url: &Url, disallow_shell
 
 #[cfg(test)]
 mod tests;
+
+/// A pure-Rust SSH transport built on `russh`, used instead of spawning the `ssh` binary.
+#[cfg(feature = "russh-client")]
+pub mod russh_transport;
+#[cfg(feature = "russh-client")]
+pub use russh_transport::{RusshConnectOptions, RusshError, RusshOnDemand};

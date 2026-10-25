@@ -15,19 +15,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use russh::keys::PrivateKeyWithHashAlg;
 use russh::client::Handler;
+use russh::keys::PrivateKeyWithHashAlg;
 use russh::ChannelMsg;
 use tokio::runtime::Handle;
 
+use crate::client::git::blocking_io::Connection;
+use crate::client::git::ConnectMode;
 use crate::client::{
     blocking_io::{request::RequestWriter, SetServiceResponse, Transport},
     TransportWithoutIO, WriteMode,
 };
-use crate::client::git::blocking_io::Connection;
-use crate::client::git::ConnectMode;
 use crate::{Protocol, Service};
-use gix_error::{ErrorExt, ResultExt, message};
 
 /// Shared state for an SSH channel, wrapped in `Arc<Mutex>` so reader and writer
 /// can operate independently while sharing the same underlying channel.
@@ -123,9 +122,10 @@ impl Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let shared = self.shared.lock().unwrap();
         let cursor = Cursor::new(buf.to_vec());
-        let channel = shared.channel.as_ref().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "SSH channel already closed")
-        })?;
+        let channel = shared
+            .channel
+            .as_ref()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "SSH channel already closed"))?;
         shared
             .rt_handle
             .block_on(async { channel.data(cursor).await })
@@ -164,16 +164,14 @@ impl Handler for KnownHostsHandler {
                 // Key not found in known_hosts
                 gix_trace::warn!(
                     "Host {}:{} not found in known_hosts. Set accept_unknown_hosts: true to accept.",
-                    self.host, self.port
+                    self.host,
+                    self.port
                 );
                 Ok(false)
             }
             Err(_e) => {
                 // Key mismatch — possible MITM attack
-                gix_trace::error!(
-                    "Host key verification failed for {}:{}: {}",
-                    self.host, self.port, e
-                );
+                gix_trace::error!("Host key verification failed for {}:{}: {}", self.host, self.port, e);
                 Ok(false)
             }
         }
@@ -230,21 +228,66 @@ impl std::error::Error for RusshError {
 }
 
 
+/// Private-key material for the native russh SSH transport.
+#[derive(Debug, Clone)]
+pub enum RusshKeyMaterial {
+    /// Load the private key from a filesystem path.
+    Path(std::path::PathBuf),
+    /// Decode private-key PEM/OpenSSH/PPK text supplied in memory.
+    InMemory(String),
+}
+
+impl Default for RusshKeyMaterial {
+    fn default() -> Self {
+        Self::Path(std::path::PathBuf::from("~/.ssh/id_ed25519"))
+    }
+}
+
 /// Options for connecting via the native russh SSH transport.
 #[derive(Debug, Clone)]
 pub struct RusshConnectOptions {
-    /// Path to the SSH private key file.
-    pub key_path: std::path::PathBuf,
+    /// Private-key material used for SSH public-key authentication.
+    pub key: RusshKeyMaterial,
     /// Optional password for encrypted private keys.
     pub key_password: Option<String>,
     /// Accept unknown host keys (insecure, for development only).
     pub accept_unknown_hosts: bool,
 }
 
+impl RusshConnectOptions {
+    /// Create options that load the private key from `key_path`.
+    pub fn from_key_path(key_path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            key: RusshKeyMaterial::Path(key_path.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create options that decode private-key material from memory.
+    pub fn from_private_key_pem(private_key_pem: impl Into<String>) -> Self {
+        Self {
+            key: RusshKeyMaterial::InMemory(private_key_pem.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Resolve the configured key material into a russh private key.
+    pub fn load_private_key(&self) -> Result<russh::keys::PrivateKey, RusshError> {
+        match &self.key {
+            RusshKeyMaterial::Path(key_path) => russh::keys::load_secret_key(key_path, self.key_password.as_deref())
+                .map_err(|e| RusshError::Key(e.to_string())),
+            RusshKeyMaterial::InMemory(private_key_pem) => {
+                russh::keys::decode_secret_key(private_key_pem, self.key_password.as_deref())
+                    .map_err(|e| RusshError::Key(e.to_string()))
+            }
+        }
+    }
+}
+
 impl Default for RusshConnectOptions {
     fn default() -> Self {
         Self {
-            key_path: std::path::PathBuf::from("~/.ssh/id_ed25519"),
+            key: RusshKeyMaterial::default(),
             key_password: None,
             accept_unknown_hosts: false,
         }
@@ -303,13 +346,10 @@ impl RusshOnDemand {
             port,
             accept_unknown: true, // TODO: read from RusshConnectOptions
         };
-        let mut session = rt_handle.block_on(async {
-            russh::client::connect(config, (&*host, port), handler).await
-        })?;
+        let mut session =
+            rt_handle.block_on(async { russh::client::connect(config, (&*host, port), handler).await })?;
 
-        let auth_result = rt_handle.block_on(async {
-            session.authenticate_publickey(&user, key_with_alg).await
-        })?;
+        let auth_result = rt_handle.block_on(async { session.authenticate_publickey(&user, key_with_alg).await })?;
 
         match auth_result {
             russh::client::AuthResult::Success => {}
@@ -334,11 +374,53 @@ impl RusshOnDemand {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{RusshConnectOptions, RusshKeyMaterial};
+
+    const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABDLGyfA39
+J2FcJygtYqi5ISAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIN+Wjn4+4Fcvl2Jl
+KpggT+wCRxpSvtqqpVrQrKN1/A22AAAAkOHDLnYZvYS6H9Q3S3Nk4ri3R2jAZlQlBbUos5
+FkHpYgNw65KCWCTXtP7ye2czMC3zjn2r98pJLobsLYQgRiHIv/CUdAdsqbvMPECB+wl/UQ
+e+JpiSq66Z6GIt0801skPh20jxOO3F52SoX1IeO5D5PXfZrfSZlw6S8c7bwyp2FHxDewRx
+7/wNsnDM0T7nLv/Q==
+-----END OPENSSH PRIVATE KEY-----";
+
+    #[test]
+    fn load_private_key_from_in_memory_pem() {
+        let mut options = RusshConnectOptions::from_private_key_pem(ED25519_KEY);
+        options.key_password = Some("blabla".to_string());
+
+        let key = options.load_private_key().expect("in-memory key decodes");
+
+        assert_eq!(key.algorithm(), russh::keys::Algorithm::Ed25519);
+    }
+
+    #[test]
+    fn load_private_key_from_path_preserves_existing_behavior() {
+        let key_path = std::env::temp_dir().join(format!("gix-transport-russh-test-{}-id_ed25519", std::process::id()));
+        std::fs::write(&key_path, ED25519_KEY).expect("write temporary key file");
+
+        let mut options = RusshConnectOptions::from_key_path(&key_path);
+        options.key_password = Some("blabla".to_string());
+        let key = options.load_private_key().expect("path key decodes");
+
+        std::fs::remove_file(&key_path).ok();
+        assert_eq!(key.algorithm(), russh::keys::Algorithm::Ed25519);
+    }
+
+    #[test]
+    fn default_key_material_uses_legacy_key_path() {
+        match RusshConnectOptions::default().key {
+            RusshKeyMaterial::Path(path) => assert_eq!(path, std::path::PathBuf::from("~/.ssh/id_ed25519")),
+            RusshKeyMaterial::InMemory(_) => panic!("default must keep path-based behavior"),
+        }
+    }
+}
+
 impl TransportWithoutIO for RusshOnDemand {
-    fn set_identity(
-        &mut self,
-        _identity: gix_sec::identity::Account,
-    ) -> Result<(), crate::client::Error> {
+    fn set_identity(&mut self, _identity: gix_sec::identity::Account) -> Result<(), crate::client::Error> {
         Err(crate::client::Error::AuthenticationUnsupported)
     }
 
@@ -376,7 +458,10 @@ impl Transport for RusshOnDemand {
 
         pre.rt_handle
             .block_on(async { pre.channel.exec(true, exec_cmd.as_bytes()).await })
-            .or_raise(|| message("Could not start the git service on the remote via the russh transport"))?;
+            .map_err(|e| crate::client::Error::InvokeProgram {
+                source: std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e.to_string()),
+                command: format!("ssh {} {}", self.url.host().unwrap_or_default(), service.as_str()).into(),
+            })?;
 
         // Create the shared channel state and split into reader/writer
         let shared = Arc::new(Mutex::new(SharedChannel {
@@ -418,7 +503,7 @@ impl Transport for RusshOnDemand {
     ) -> Result<RequestWriter<'_>, crate::client::Error> {
         self.connection
             .as_mut()
-            .ok_or_else(|| message("handshake() must be called before request()").raise())?
+            .ok_or(crate::client::Error::MissingHandshake)?
             .request(write_mode, on_into_read, trace)
     }
 }

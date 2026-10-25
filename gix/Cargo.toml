@@ -206,6 +206,12 @@ async-network-client-async-std = [
     "gix-transport/async-std",
 ]
 ## Make `gix-protocol` available along with a blocking client, providing access to the `file://`, `git://` and `ssh://` transports.
+## Stacks with `blocking-network-client` to use the pure-Rust `russh` client for SSH
+## instead of shelling out to the `ssh` binary.
+russh-client = [
+    "blocking-network-client",
+    "gix-transport?/russh-client",
+]
 blocking-network-client = [
     "gix-protocol/blocking-client",
     "gix-pack/streaming-input",

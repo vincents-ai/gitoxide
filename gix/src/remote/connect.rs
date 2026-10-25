@@ -56,6 +56,13 @@ impl<'repo> Remote<'repo> {
                     .transpose()
                     .or_raise(|| message("Could not obtain options for connecting via ssh"))?
                     .unwrap_or_default(),
+                #[cfg(feature = "russh-client")]
+                // Opt-in native SSH transport. The key can be supplied in memory
+                // (base64/PEM in `ENGRAM_SSH_KEY`) or by path (`ENGRAM_SSH_KEY_PATH`),
+                // which is what the ADP peer-to-peer transport uses.
+                russh: scheme_is_ssh
+                    .then(russh_options_from_env)
+                    .flatten(),
                 trace: self.repo.config.trace_packet(),
             },
         )
@@ -125,4 +132,26 @@ impl<'repo> Remote<'repo> {
         }
         Ok((sanitize(url)?, version))
     }
+}
+
+/// Build native-SSH connection options from the environment, if they were requested.
+///
+/// `ENGRAM_SSH_KEY` may hold the private key itself (PEM/OpenSSH text); if it
+/// looks like a path it is treated as one. `ENGRAM_SSH_KEY_PASSWORD` provides the
+/// passphrase and `ENGRAM_SSH_ACCEPT_UNKNOWN=1` disables host-key verification
+/// (development only).
+#[cfg(feature = "russh-client")]
+fn russh_options_from_env() -> Option<gix_transport::client::blocking_io::ssh::russh_transport::RusshConnectOptions> {
+    let key = std::env::var("ENGRAM_SSH_KEY").ok()?;
+    let looks_like_path = !key.contains("-----BEGIN") && !key.contains('\n') && std::path::Path::new(&key).exists();
+    let mut options = if looks_like_path {
+        gix_transport::client::blocking_io::ssh::russh_transport::RusshConnectOptions::from_key_path(key)
+    } else {
+        gix_transport::client::blocking_io::ssh::russh_transport::RusshConnectOptions::from_private_key_pem(key)
+    };
+    options.key_password = std::env::var("ENGRAM_SSH_KEY_PASSWORD").ok();
+    options.accept_unknown_hosts = std::env::var("ENGRAM_SSH_ACCEPT_UNKNOWN")
+        .map(|value| value == "1" || value == "true")
+        .unwrap_or(false);
+    Some(options)
 }

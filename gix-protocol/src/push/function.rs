@@ -1,46 +1,21 @@
 //! The push function — sends ref updates and a packfile to the server.
 
+#[crate::bisync::only_async]
+use futures_lite::AsyncWriteExt;
+#[crate::bisync::only_sync]
 use std::io::Write;
 
-use gix_features::progress::Progress;
-
-#[cfg(feature = "async-client")]
-use crate::transport::client::async_io::Transport;
-#[cfg(feature = "blocking-client")]
-use crate::transport::client::blocking_io::Transport;
+use gix_error::{Result, ResultExt, bail, message};
+use gix_utils::progress::{Progress, steps};
 
 use crate::transport::{client::MessageKind, Service};
-use maybe_async::maybe_async;
+use crate::bisync::bisync;
+#[crate::bisync::only_async]
+use crate::transport::client::async_io::Transport;
+#[crate::bisync::only_sync]
+use crate::transport::client::blocking_io::Transport;
 
 use crate::push::{Arguments, Outcome, RefUpdate, Response, Status};
-
-/// The error returned by the [push()] function.
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum Error {
-    #[error("IO error during push")]
-    Io(#[from] std::io::Error),
-    #[error("Transport error")]
-    Transport(#[from] crate::transport::client::Error),
-    #[error("Handshake error")]
-    Handshake(#[from] crate::handshake::Error),
-    #[error("Response parse error")]
-    Response(#[from] crate::push::response::Error),
-    #[error("Push rejected: {0}")]
-    Rejected(String),
-    #[error("No ref updates to push")]
-    EmptyUpdate,
-}
-
-impl crate::transport::IsSpuriousError for Error {
-    fn is_spurious(&self) -> bool {
-        match self {
-            Error::Io(err) => err.is_spurious(),
-            Error::Transport(err) => err.is_spurious(),
-            _ => false,
-        }
-    }
-}
 
 /// Options for the push operation.
 pub struct Options {
@@ -59,7 +34,7 @@ impl Default for Options {
     }
 }
 
-/// Perform a push operation using V1 protocol over the given transport.
+/// Perform a push operation over the given `transport`, sending `ref_updates` and `pack_data`.
 ///
 /// This function:
 /// 1. Performs a handshake with `Service::ReceivePack` to get remote refs and capabilities
@@ -69,29 +44,27 @@ impl Default for Options {
 ///
 /// `pack_data` contains the pre-generated packfile bytes. The caller is responsible
 /// for enumerating the objects to include and generating the pack.
-#[maybe_async]
+#[bisync]
 pub async fn push<P, T>(
     mut transport: T,
-    authenticate: impl FnMut(
-        crate::credentials::helper::Action,
-    ) -> crate::credentials::protocol::Result,
+    authenticate: impl FnMut(crate::credentials::helper::Action) -> Result<Option<crate::credentials::protocol::Outcome>>,
     ref_updates: Vec<RefUpdate>,
     pack_data: &[u8],
     mut progress: P,
     options: Options,
-) -> Result<Outcome, Error>
+) -> Result<Outcome>
 where
     P: Progress,
     T: Transport,
 {
     if ref_updates.is_empty() {
-        return Err(Error::EmptyUpdate);
+        bail!("No ref updates to push");
     }
 
     progress.set_name("push".into());
-    progress.init(Some(4), gix_features::progress::steps());
+    progress.init(Some(4), steps());
 
-    // Step 1: Handshake with ReceivePack service
+    // Step 1: Handshake with the ReceivePack service.
     progress.step();
     let handshake_result = crate::handshake::function::handshake(
         &mut transport,
@@ -100,48 +73,66 @@ where
         Vec::new(),
         &mut progress,
     )
-    .await?;
+    .await
+    .or_raise(|| message("Handshake for push failed"))?;
 
-    // Build arguments from capabilities and ref updates
+    // Build arguments from capabilities and ref updates.
     let arguments = Arguments::new(
         ref_updates,
         &handshake_result.capabilities,
         handshake_result.server_protocol_version,
     );
 
-    // Step 2: Open a request writer for sending ref commands.
-    // Binary mode frames each write() as a packet line — correct for the
-    // ref-update commands, which must be pkt-line encoded in V1.
-    // on_into_read is unused: we dissolve into parts to write the pack raw.
+    // Step 2: Send the ref-update commands.
+    //
+    // Binary mode frames each write() as a packet line, which is what the ref
+    // commands need; the pack itself is written raw afterwards.
     progress.step();
-    let mut writer = transport.request(
-        crate::transport::client::WriteMode::Binary,
-        MessageKind::Flush,
-        options.trace,
-    )?;
+    let mut writer = transport
+        .request(
+            crate::transport::client::WriteMode::Binary,
+            MessageKind::Flush,
+            options.trace,
+        )
+        .or_raise(|| message("Could not open a request writer for the push"))?;
 
-    // Write each ref-update command as its own packet line.
-    // encode() yields one command per entry; emit them individually so each
-    // is framed as a distinct pkt-line (V1: one ref-update command per line).
     for command in arguments.encode_lines() {
-        writer.write_all(&command)?;
-        writer.flush()?;
+        writer
+            .write_all(&command)
+            .await
+            .or_raise(|| message("Could not write a ref update command"))?;
+        writer
+            .flush()
+            .await
+            .or_raise(|| message("Could not flush a ref update command"))?;
     }
-    // Flush after the ref commands.
-    writer.write_message(MessageKind::Flush)?;
-    writer.flush()?;
+    writer
+        .write_message(MessageKind::Flush)
+        .await
+        .or_raise(|| message("Could not write the end of the ref update commands"))?;
+    writer
+        .flush()
+        .await
+        .or_raise(|| message("Could not flush the ref update commands"))?;
 
-    // Step 3: Send the packfile as RAW bytes (not pkt-line encoded).
-    // V1 git-receive-pack expects commands+flush, then the packfile verbatim.
-    // into_parts() yields a writer that writes verbatim (no packetline framing)
-    // plus the response reader. The writer MUST be dropped before reading.
+    // Step 3: Send the packfile as raw bytes (not packet-line encoded). V1
+    // git-receive-pack expects commands+flush, then the packfile verbatim.
     let reader = if pack_data.is_empty() {
-        writer.into_read()?
+        writer
+            .into_read()
+            .await
+            .or_raise(|| message("Could not transition the request writer into a reader"))?
     } else {
         progress.step();
         let (mut raw_writer, reader) = writer.into_parts();
-        raw_writer.write_all(pack_data)?;
-        raw_writer.flush()?;
+        raw_writer
+            .write_all(pack_data)
+            .await
+            .or_raise(|| message("Could not write the packfile"))?;
+        raw_writer
+            .flush()
+            .await
+            .or_raise(|| message("Could not flush the packfile"))?;
         drop(raw_writer);
         reader
     };
@@ -149,14 +140,12 @@ where
     // Step 4: Parse the server's status report.
     progress.step();
     let ref_statuses = if arguments.report_status() {
-        let response = Response::from_blocking_reader(reader)?;
-        response.ref_statuses
+        Response::from_reader(reader).await?.ref_statuses
     } else {
-        // No report-status: assume success for all refs
         arguments
             .updates()
             .iter()
-            .map(|u| (u.name.clone(), Status::Ok))
+            .map(|update| (update.name.clone(), Status::Ok))
             .collect()
     };
 

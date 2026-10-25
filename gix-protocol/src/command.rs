@@ -10,6 +10,7 @@ impl Command {
         match self {
             Command::LsRefs => "ls-refs",
             Command::Fetch => "fetch",
+            Command::Push => "push",
         }
     }
 }
@@ -53,12 +54,14 @@ mod with_io {
                     // wait-for-done feature
                     "wait-for-done",
                 ],
+                Command::Push => &["src-ref ", "report-status", "side-band-64k", "thin-pack"],
             }
         }
 
         fn all_features(&self, version: gix_transport::Protocol) -> &'static [&'static str] {
             match self {
                 Command::LsRefs => &[],
+                Command::Push => &[],
                 Command::Fetch => match version {
                     gix_transport::Protocol::V0 | gix_transport::Protocol::V1 => &[
                         "multi_ack",
@@ -109,6 +112,8 @@ mod with_io {
                     )
                     .collect(),
                 Command::LsRefs => vec![b"symrefs".as_bstr().to_owned(), b"peel".as_bstr().to_owned()],
+                // git-receive-pack takes no default wants.
+                Command::Push => vec![],
             }
         }
 
@@ -156,6 +161,7 @@ mod with_io {
                     }
                 },
                 Command::LsRefs => vec![],
+                Command::Push => vec![],
             };
             // Echo the server's object format in every v2 command.
             // A stateless transport like HTTP sends each command as its own request, so without this,

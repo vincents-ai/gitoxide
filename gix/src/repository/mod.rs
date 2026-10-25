@@ -117,6 +117,7 @@ pub(crate) mod init;
 mod location;
 #[cfg(feature = "mailmap")]
 mod mailmap;
+mod pack;
 ///
 #[cfg(feature = "merge")]
 mod merge;

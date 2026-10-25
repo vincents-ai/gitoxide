@@ -12,6 +12,6 @@ mod response;
 mod types;
 
 pub use arguments::Arguments;
-pub use function::{push, Error, Options};
+pub use function::{push, Options};
 pub use response::Response;
 pub use types::{Outcome, RefUpdate, Status};

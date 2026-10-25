@@ -34,6 +34,8 @@ pub enum Command {
     LsRefs,
     /// Fetch a pack.
     Fetch,
+    /// Push objects to the server.
+    Push,
 }
 pub mod command;
 
@@ -65,6 +67,12 @@ pub use gix_transport as transport;
 pub mod fetch;
 #[cfg(any(feature = "blocking-client", feature = "async-client"))]
 pub use fetch::function::fetch;
+
+/// Push protocol support, i.e. `git-receive-pack`, for both client modes.
+#[cfg(any(feature = "blocking-client", feature = "async-client"))]
+pub mod push;
+#[cfg(any(feature = "blocking-client", feature = "async-client"))]
+pub use push::function::push;
 
 mod remote_progress;
 pub use remote_progress::RemoteProgress;
