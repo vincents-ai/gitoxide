@@ -151,14 +151,22 @@ impl Handler for KnownHostsHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         if self.accept_unknown {
             // Insecure mode: accept any key (for development/testing)
             return Ok(true);
         }
 
-        match russh::keys::check_known_hosts(&self.host, self.port, server_public_key) {
+        // A certificate names the same key data as a public key; normalize both
+        // to `PublicKey` so known_hosts comparison is identical for either.
+        let key: russh::keys::ssh_key::PublicKey = match server_public_key {
+            russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => key.clone(),
+            russh::keys::PublicKeyOrCertificate::Certificate(cert) => {
+                cert.public_key().clone().into()
+            }
+        };
+        match russh::keys::check_known_hosts(&self.host, self.port, &key) {
             Ok(true) => Ok(true),
             Ok(false) => {
                 // Key not found in known_hosts
@@ -169,7 +177,7 @@ impl Handler for KnownHostsHandler {
                 );
                 Ok(false)
             }
-            Err(_e) => {
+            Err(e) => {
                 // Key mismatch — possible MITM attack
                 gix_trace::error!("Host key verification failed for {}:{}: {}", self.host, self.port, e);
                 Ok(false)
